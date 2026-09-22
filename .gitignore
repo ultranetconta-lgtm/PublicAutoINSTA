@@ -1,0 +1,9 @@
+api/.env
+api/.env.backup-*
+backend/data/*.json
+backend/uploads/*
+!backend/data/.gitkeep
+!backend/uploads/.gitkeep
+__pycache__/
+*.py[cod]
+.DS_Store

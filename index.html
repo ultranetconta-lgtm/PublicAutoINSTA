@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Criar nova publicação - Metricool Planner</title>
+  
+  <!-- FontAwesome 6 CDN -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <!-- Material Design Icons CDN -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css">
+  <!-- Google Fonts Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS CDN for utility compatibility -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Application Styles -->
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+  <!-- Fullscreen Planner App Container -->
+  <div class="planner-app-container">
+    
+    <!-- Top Progress Linear Indicator -->
+    <div class="v-progress-linear">
+      <div class="v-progress-linear__indeterminate"></div>
+    </div>
+
+    <!-- Page Header -->
+    <header class="page-header">
+      <div class="page-header-title-row">
+        <div class="flex items-center gap-6">
+          <div class="flex items-center gap-3">
+            <h1 class="text-2xl font-bold text-gray-900 tracking-tight">Criar nova publicação</h1>
+            
+            <!-- Brand Pill (Profile) -->
+            <div class="brand-pill cursor-pointer" title="alesantorooficial">
+              <div class="v-avatar">
+                <img src="assets/avatar.jpg" alt="Alessandra Santoro" onerror="this.src='https://ui-avatars.com/api/?name=Alessandra+Santoro&background=0284c7&color=fff'">
+              </div>
+              <span class="brand-pill__name truncate max-w-[160px]">alesantorooficial</span>
+            </div>
+          </div>
+
+          <!-- Top Navigation Tabs (Aba Agendamentos & Calendário) -->
+          <nav class="top-nav-tabs">
+            <button type="button" class="top-nav-tab active" id="tabBtnPlanner" data-tab="planner">
+              <i class="fa-solid fa-pen-to-square text-sm"></i>
+              <span>Criar publicação</span>
+            </button>
+            <button type="button" class="top-nav-tab" id="tabBtnAgendamentos" data-tab="agendamentos">
+              <i class="fa-solid fa-calendar-days text-sm"></i>
+              <span>Agendamentos</span>
+              <span class="tab-badge" id="agendamentosCountBadge">3</span>
+            </button>
+          </nav>
+        </div>
+
+        <!-- Close Button -->
+        <div>
+          <button type="button" class="header-button" id="btnClosePlanner">
+            <i class="fa-solid fa-xmark text-sm mr-1"></i>
+            <span>Fechar</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- VIEW 1: Planejador (Criar Nova Publicação) -->
+    <div class="app-view active" id="viewPlanner">
+      <main id="post-planner-main-container">
+      
+      <!-- LEFT COLUMN: Editor and Configuration (58%) -->
+      <section class="planner-left-column">
+        
+        <!-- Networks Selector Bar -->
+        <div class="networks-bar">
+          <div class="network-badge-group">
+            <div class="network-card-instagram" id="networkSelectorTrigger">
+              <div class="network-icon-wrap">
+                <i class="fa-brands fa-instagram"></i>
+                <div class="trial-reel-badge" id="networkBadgeIcon">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M18.75 3H5.25C4.00736 3 3 4.00736 3 5.25V18.75C3 19.9926 4.00736 21 5.25 21H18.75C19.9926 21 21 19.9926 21 18.75V5.25C21 4.00736 19.9926 3 18.75 3ZM8.25 4.5H11.25L9.75 8.25H6.75L8.25 4.5ZM12.75 4.5H15.75L14.25 8.25H11.25L12.75 4.5ZM17.25 4.5H18.75C19.1642 4.5 19.5 4.83579 19.5 5.25V8.25H15.75L17.25 4.5ZM19.5 18.75C19.5 19.1642 19.1642 19.5 18.75 19.5H5.25C4.83579 19.5 4.5 19.1642 4.5 18.75V9.75H19.5V18.75Z"/>
+                  </svg>
+                </div>
+              </div>
+              <button type="button" class="network-mode-btn" id="btnNetworkMode">
+                <span id="currentNetworkModeText">REELS DE TESTE</span>
+                <i class="fa-solid fa-chevron-down text-[9px] text-gray-500"></i>
+              </button>
+            </div>
+
+            <!-- Add More Networks Button -->
+            <button type="button" class="network-add-btn" title="Adicionar mais redes">
+              <i class="mdi mdi-plus text-lg"></i>
+            </button>
+          </div>
+
+          <!-- Network Dropdown Menu (Screenshot 1) -->
+          <div class="network-dropdown-menu" id="networkDropdownMenu">
+            <!-- 1. Post -->
+            <div class="network-dropdown-item" data-mode="post" data-label="POST">
+              <div class="item-icon">
+                <i class="fa-solid fa-table-cells"></i>
+              </div>
+              <div class="item-info">
+                <div class="item-title">Post</div>
+                <div class="item-subtitle">Publicação automática de uma imagem ou um carrossel</div>
+              </div>
+              <div class="item-check hidden"><i class="fa-solid fa-check"></i></div>
+            </div>
+
+            <!-- 2. Reel -->
+            <div class="network-dropdown-item" data-mode="reel" data-label="REEL">
+              <div class="item-icon">
+                <i class="fa-solid fa-film"></i>
+              </div>
+              <div class="item-info">
+                <div class="item-title">Reel</div>
+                <div class="item-subtitle">Publicação automática de um vídeo</div>
+              </div>
+              <div class="item-check hidden"><i class="fa-solid fa-check"></i></div>
+            </div>
+
+            <!-- 3. Story -->
+            <div class="network-dropdown-item" data-mode="story" data-label="STORY">
+              <div class="item-icon">
+                <i class="fa-regular fa-circle-dot"></i>
+              </div>
+              <div class="item-info">
+                <div class="item-title">Story</div>
+                <div class="item-subtitle">Publicar automaticamente uma imagem ou vídeo</div>
+              </div>
+              <div class="item-check hidden"><i class="fa-solid fa-check"></i></div>
+            </div>
+
+            <!-- 4. Reels de teste (Active) -->
+            <div class="network-dropdown-item active" data-mode="test_reel" data-label="REELS DE TESTE">
+              <div class="item-icon">
+                <i class="fa-solid fa-clapperboard"></i>
+              </div>
+              <div class="item-info">
+                <div class="item-title">Reels de teste</div>
+                <div class="item-subtitle">Postagem automática de uma fileira de teste</div>
+              </div>
+              <div class="item-check"><i class="fa-solid fa-check"></i></div>
+            </div>
+          </div>
+
+          <div class="bar-extra-actions">
+            <button type="button" class="btn-pill-action" id="btnNotes">
+              <i class="fa-regular fa-note-sticky text-gray-500"></i>
+              <span>Observações</span>
+            </button>
+            <button type="button" class="btn-pill-action xl:hidden" id="btnShowPreviewMobile">
+              <i class="fa-regular fa-eye text-gray-500"></i>
+              <span>Mostrar pré-visualização</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Post Content Editor Card -->
+        <div class="editor-container">
+          <div class="editor-box-card">
+            
+            <!-- Hidden File Input for Media -->
+            <input type="file" id="mediaFileInput" accept="image/*,video/*" class="hidden">
+
+            <!-- Contenteditable Post Content Area -->
+            <div class="editor-textarea" id="postEditor" contenteditable="true" data-placeholder="" spellcheck="false"></div>
+
+            <!-- In-Editor Media Thumbnail (Screenshot 3) -->
+            <div class="editor-media-preview-area" id="editorMediaPreviewArea">
+              <div class="editor-media-thumb" id="editorMediaThumb">
+                <video src="assets/CLIP6.mp4" id="thumbVideo" muted playsinline></video>
+                <img src="assets/avatar.jpg" id="thumbImage" class="hidden" alt="Thumb">
+                <button type="button" class="editor-thumb-dots" id="btnThumbOptions" title="Opções de mídia">
+                  <i class="fa-solid fa-ellipsis"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- Editor Action Bar / Toolbar -->
+            <div class="editor-toolbar">
+              <div class="editor-tools-group">
+                <!-- Add Media Button -->
+                <button type="button" class="editor-tool-btn" id="btnAddMedia" title="Adicionar imagem ou vídeo">
+                  <svg viewBox="0 0 48 48">
+                    <path d="M10.5 10.2857C9.25547 10.2857 8.25 11.3071 8.25 12.5714V29.2429L13.0102 24.4071C14.107 23.2929 15.8859 23.2929 16.9898 24.4071L21.75 29.2429L31.0102 19.8357C32.107 18.7214 33.8859 18.7214 34.9898 19.8357L39.75 24.6714V12.5714C39.75 11.3071 38.7445 10.2857 37.5 10.2857H10.5ZM8.25 32.4714V35.4286C8.25 36.6929 9.25547 37.7143 10.5 37.7143H13.4109L20.1609 30.8571L15.4008 26.0214C15.1828 25.8 14.8242 25.8 14.6062 26.0214L8.25 32.4714ZM33.4008 21.45C33.1828 21.2286 32.8242 21.2286 32.6062 21.45L16.5891 37.7143H37.5C38.7445 37.7143 39.75 36.6929 39.75 35.4286V27.9L33.4008 21.45ZM6 12.5714C6 10.05 8.01797 8 10.5 8H37.5C39.982 8 42 10.05 42 12.5714V35.4286C42 37.95 39.982 40 37.5 40H10.5C8.01797 40 6 37.95 6 35.4286V12.5714ZM17.25 16C17.25 15.6969 17.1315 15.4062 16.9205 15.1919C16.7095 14.9776 16.4234 14.8571 16.125 14.8571C15.8266 14.8571 15.5405 14.9776 15.3295 15.1919C15.1185 15.4062 15 15.6969 15 16C15 16.3031 15.1185 16.5938 15.3295 16.8081C15.5405 17.0224 15.8266 17.1429 16.125 17.1429C16.4234 17.1429 16.7095 17.0224 16.9205 16.8081C17.1315 16.5938 17.25 16.3031 17.25 16ZM12.75 16C12.75 15.0907 13.1056 14.2186 13.7385 13.5756C14.3715 12.9327 15.2299 12.5714 16.125 12.5714C17.0201 12.5714 17.8786 12.9327 18.5115 13.5756C19.1444 14.2186 19.5 15.0907 19.5 16C19.5 16.9093 19.1444 17.7814 18.5115 18.4244C17.8786 19.0673 17.0201 19.4286 16.125 19.4286C15.2299 19.4286 14.3715 19.0673 13.7385 18.4244C13.1056 17.7814 12.75 16.9093 12.75 16Z"></path>
+                  </svg>
+                </button>
+
+                <!-- Emoji Picker Button -->
+                <button type="button" class="editor-tool-btn" id="btnEmoji" title="Emoji">
+                  <svg viewBox="0 0 48 48">
+                    <path d="M41.5 24C41.5 19.3587 39.6563 14.9075 36.3744 11.6256C33.0925 8.34374 28.6413 6.5 24 6.5C19.3587 6.5 14.9075 8.34374 11.6256 11.6256C8.34374 14.9075 6.5 19.3587 6.5 24C6.5 28.6413 8.34374 33.0925 11.6256 36.3744C14.9075 39.6563 19.3587 41.5 24 41.5C28.6413 41.5 33.0925 39.6563 36.3744 36.3744C39.6563 33.0925 41.5 28.6413 41.5 24ZM4 24C4 18.6957 6.10714 13.6086 9.85786 9.85786C13.6086 6.10714 18.6957 4 24 4C29.3043 4 34.3914 6.10714 38.1421 9.85786C41.8929 13.6086 44 18.6957 44 24C44 29.3043 41.8929 34.3914 38.1421 38.1421C34.3914 41.8929 29.3043 44 24 44C18.6957 44 13.6086 41.8929 9.85786 38.1421C6.10714 34.3914 4 29.3043 4 24ZM16.8203 29.4297C18.2188 31.0469 20.6094 32.75 24 32.75C27.3906 32.75 29.7812 31.0469 31.1797 29.4297C31.6328 28.9062 32.4219 28.8516 32.9453 29.3047C33.4688 29.7578 33.5234 30.5469 33.0703 31.0703C31.3281 33.0703 28.3047 35.25 24 35.25C19.6953 35.25 16.6719 33.0703 14.9297 31.0703C14.4766 30.5469 14.5312 29.7578 15.0547 29.3047C15.5781 28.8516 16.3672 28.9062 16.8203 29.4297ZM15.9062 20.25C15.9062 19.7527 16.1038 19.2758 16.4554 18.9242C16.8071 18.5725 17.284 18.375 17.7812 18.375C18.2785 18.375 18.7554 18.5725 19.1071 18.9242C19.4587 19.2758 19.6562 19.7527 19.6562 20.25C19.6562 20.7473 19.4587 21.2242 19.1071 21.5758C18.7554 21.9275 18.2785 22.125 17.7812 22.125C17.284 22.125 16.8071 21.9275 16.4554 21.5758C16.1038 21.2242 15.9062 20.7473 15.9062 20.25ZM30.2812 18.375C30.7785 18.375 31.2554 18.5725 31.6071 18.9242C31.9587 19.2758 32.1562 19.7527 32.1562 20.25C32.1562 20.7473 31.9587 21.2242 31.6071 21.5758C31.2554 21.9275 30.7785 22.125 30.2812 22.125C29.784 22.125 29.3071 21.9275 28.9554 21.5758C28.6038 21.2242 28.4062 20.7473 28.4062 20.25C28.4062 19.7527 28.6038 19.2758 28.9554 18.9242C29.3071 18.5725 29.784 18.375 30.2812 18.375Z"></path>
+                  </svg>
+                </button>
+
+                <!-- Hashtag Generator Button (Screenshot 2) -->
+                <button type="button" class="editor-tool-btn" id="btnHashtag" title="Hashtags">
+                  <svg viewBox="0 0 48 48">
+                    <path d="M22.6821 7.5762C22.8429 6.88518 22.4089 6.19416 21.7179 6.03346C21.0268 5.87276 20.3357 6.30665 20.175 6.99767L18.3268 15.0007H9.85714C9.15 15.0007 8.57143 15.5792 8.57143 16.2863C8.57143 16.9934 9.15 17.5719 9.85714 17.5719H17.7321L14.767 30.4281H7.28571C6.57857 30.4281 6 31.0066 6 31.7137C6 32.4208 6.57857 32.9993 7.28571 32.9993H14.1723L12.4607 40.4238C12.3 41.1148 12.7339 41.8058 13.425 41.9665C14.1161 42.1272 14.8071 41.6933 14.9679 41.0023L16.8161 32.9993H27.0375L25.3259 40.4238C25.1652 41.1148 25.5991 41.8058 26.2902 41.9665C26.9812 42.1272 27.6723 41.6933 27.833 41.0023L29.6813 32.9993H38.1429C38.85 32.9993 39.4286 32.4208 39.4286 31.7137C39.4286 31.0066 38.85 30.4281 38.1429 30.4281H30.2679L33.233 17.5719H40.7143C41.4214 17.5719 42 16.9934 42 16.2863C42 15.5792 41.4214 15.0007 40.7143 15.0007H33.8277L35.5393 7.5762C35.7 6.88518 35.2661 6.19416 34.575 6.03346C33.8839 5.87276 33.1929 6.30665 33.0321 6.99767L31.1839 15.0007H20.9625L22.6741 7.5762H22.6821ZM20.3759 17.5719H30.5893L27.6241 30.4281H17.4107L20.3759 17.5719Z"></path>
+                  </svg>
+                </button>
+
+                <!-- First Comment Button -->
+                <button type="button" class="editor-tool-btn" id="firstComment" title="Primeiro comentário">
+                  <i class="fa-regular fa-comment"></i>
+                </button>
+
+                <!-- Location Button -->
+                <button type="button" class="editor-tool-btn" id="btnLocation" title="Adicionar localização">
+                  <svg viewBox="0 0 48 48">
+                    <path d="M35.75 19.5C35.75 13.2844 30.7156 8.25 24.5 8.25C18.2844 8.25 13.25 13.2844 13.25 19.5C13.25 20.5969 13.6297 22.1016 14.4172 23.9578C15.1836 25.7789 16.2594 27.7547 17.4828 29.7305C19.8805 33.6187 22.7141 37.3383 24.507 39.5742C26.293 37.3383 29.1336 33.6187 31.5312 29.7305C32.7477 27.7547 33.8305 25.7719 34.5969 23.9578C35.3703 22.1016 35.75 20.5969 35.75 19.5ZM38 19.5C38 25.6453 29.7734 36.5859 26.1664 41.1C25.3016 42.1758 23.6984 42.1758 22.8336 41.1C19.2266 36.5859 11 25.6453 11 19.5C11 12.0469 17.0469 6 24.5 6C31.9531 6 38 12.0469 38 19.5ZM21.125 19.5C21.125 20.3951 21.4806 21.2536 22.1135 21.8865C22.7464 22.5194 23.6049 22.875 24.5 22.875C25.3951 22.875 26.2536 22.5194 26.8865 21.8865C27.5194 21.2536 27.875 20.3951 27.875 19.5C27.875 18.6049 27.5194 17.7464 26.8865 17.1135C26.2536 16.4806 25.3951 16.125 24.5 16.125C23.6049 16.125 22.7464 16.4806 22.1135 17.1135C21.4806 17.7464 21.125 18.6049 21.125 19.5ZM24.5 25.125C23.0082 25.125 21.5774 24.5324 20.5225 23.4775C19.4676 22.4226 18.875 20.9918 18.875 19.5C18.875 18.0082 19.4676 16.5774 20.5225 15.5225C21.5774 14.4676 23.0082 13.875 24.5 13.875C25.9918 13.875 27.4226 14.4676 28.4775 15.5225C29.5324 16.5774 30.125 18.0082 30.125 19.5C30.125 20.9918 29.5324 22.4226 28.4775 23.4775C27.4226 24.5324 25.9918 25.125 24.5 25.125Z"></path>
+                  </svg>
+                </button>
+
+                <!-- Link Button -->
+                <button type="button" class="editor-tool-btn" id="btnLink" title="Adicionar link">
+                  <svg viewBox="0 0 48 48">
+                    <path d="M41.5728 24C44.8091 20.7963 44.8091 15.6064 41.5728 12.4027C38.3366 9.19908 33.0939 9.19908 29.8576 12.4027L28.3948 13.8508C27.9935 14.2481 27.9935 14.9016 28.3948 15.2989C28.7961 15.6961 29.4563 15.6961 29.8576 15.2989L31.3204 13.8508C33.7476 11.4481 37.6828 11.4481 40.11 13.8508C42.5372 16.2535 42.5372 20.1492 40.11 22.5519L32.0453 30.5291C29.6246 32.9254 25.6958 32.9254 23.2686 30.5291C20.9644 28.2481 20.835 24.5959 22.9644 22.1611L23.3074 21.7703C23.6828 21.341 23.6375 20.6938 23.2039 20.3222C22.7702 19.9506 22.1165 19.9954 21.7411 20.4247L21.3981 20.8156C18.5566 24.0641 18.7314 28.9336 21.7994 31.9707C25.0291 35.168 30.2718 35.168 33.5016 31.9707L41.5728 24ZM6.42718 24C3.19094 27.2037 3.19094 32.3936 6.42718 35.5973C9.66343 38.8009 14.9061 38.8009 18.1424 35.5973L19.6052 34.1492C20.0065 33.7519 20.0065 33.0984 19.6052 32.7011C19.2039 32.3039 18.5437 32.3039 18.1424 32.7011L16.6796 34.1492C14.2524 36.5519 10.3172 36.5519 7.88997 34.1492C5.46278 31.7465 5.46278 27.8508 7.88997 25.4481L15.9547 17.4709C18.3754 15.0746 22.3042 15.0746 24.7314 17.4709C27.0356 19.7519 27.1651 23.4041 25.0356 25.8389L24.6926 26.2297C24.3172 26.659 24.3625 27.3062 24.7961 27.6778C25.2298 28.0494 25.8835 28.0046 26.2589 27.5753L26.6019 27.1844C29.4434 23.9359 29.2686 19.0664 26.2006 16.0293C22.9579 12.8192 17.7217 12.8192 14.4854 16.0165L6.42718 24Z"></path>
+                  </svg>
+                </button>
+
+                <!-- AI Assistant Button -->
+                <button type="button" class="editor-tool-btn" id="btnAI" title="Assistente IA">
+                  <svg viewBox="0 0 48 48">
+                    <path d="M35.6042 9.34473C35.8194 9.13281 36.1736 9.13281 36.3889 9.34473L39.125 12.0381C39.3403 12.25 39.3403 12.5986 39.125 12.8105L30.7708 21.0479L27.25 17.582L35.6042 9.34473ZM8.42361 36.1006L25.6736 19.1201L29.1944 22.5859L11.9514 39.5732C11.7361 39.7852 11.3819 39.7852 11.1667 39.5732L8.42361 36.8799C8.20833 36.668 8.20833 36.3193 8.42361 36.1074V36.1006ZM34.0347 7.7998L6.85417 34.5557C5.77083 35.6221 5.77083 37.3516 6.85417 38.4248L9.59028 41.1182C10.6736 42.1846 12.4306 42.1846 13.5208 41.1182L40.7014 14.3623C41.7847 13.2959 41.7847 11.5664 40.7014 10.4932L37.9653 7.7998C36.8819 6.7334 35.125 6.7334 34.0347 7.7998ZM12.6667 12.4277C12.6667 11.8262 12.1667 11.334 11.5556 11.334C10.9444 11.334 10.4444 11.8262 10.4444 12.4277V15.709H7.11111C6.5 15.709 6 16.2012 6 16.8027C6 17.4043 6.5 17.8965 7.11111 17.8965H10.4444V21.1777C10.4444 21.7793 10.9444 22.2715 11.5556 22.2715C12.1667 22.2715 12.6667 21.7793 12.6667 21.1777V17.8965H16C16.6111 17.8965 17.1111 17.4043 17.1111 16.8027C17.1111 16.2012 16.6111 15.709 16 15.709H12.6667V12.4277ZM36 28.834C35.3889 28.834 34.8889 29.3262 34.8889 29.9277V33.209H31.5556C30.9444 33.209 30.4444 33.7012 30.4444 34.3027C30.4444 34.9043 30.9444 35.3965 31.5556 35.3965H34.8889V38.6777C34.8889 39.2793 35.3889 39.7715 36 39.7715C36.6111 39.7715 37.1111 39.2793 37.1111 38.6777V35.3965H40.4444C41.0556 35.3965 41.5556 34.9043 41.5556 34.3027C41.5556 33.7012 41.0556 33.209 40.4444 33.209H37.1111V29.9277C37.1111 29.3262 36.6111 28.834 36 28.834ZM21.2917 8.05273C21.2917 7.59473 20.9167 7.21875 20.4444 7.21875C19.9722 7.21875 19.5972 7.58789 19.5972 8.05273V9.40625H18.2222C17.7569 9.40625 17.375 9.77539 17.375 10.2402C17.375 10.7051 17.75 11.0742 18.2222 11.0742H19.5972V12.4277C19.5972 12.8857 19.9722 13.2617 20.4444 13.2617C20.9167 13.2617 21.2917 12.8926 21.2917 12.4277V11.0742H22.6667C23.1319 11.0742 23.5139 10.7051 23.5139 10.2402C23.5139 9.77539 23.1389 9.40625 22.6667 9.40625H21.2917V8.05273Z"></path>
+                  </svg>
+                </button>
+
+                <!-- Saved Texts Button -->
+                <button type="button" class="editor-tool-btn" id="btnSavedTexts" title="Textos guardados">
+                  <svg viewBox="0 0 48 48">
+                    <path d="M10 9.375C10 7.51172 11.5677 6 13.5 6H34.5C36.4323 6 38 7.51172 38 9.375V40.4461C38 41.3039 37.2781 42 36.3885 42C36.0677 42 35.7615 41.9086 35.4917 41.7398L24 34.35L12.5083 41.7398C12.2458 41.9086 11.9323 42 11.6115 42C10.7219 42 10 41.3039 10 40.4461V9.375ZM13.5 8.25C12.8583 8.25 12.3333 8.75625 12.3333 9.375V39.1453L23.351 32.0648C23.7448 31.8117 24.2552 31.8117 24.649 32.0648L35.6667 39.1453V9.375C35.6667 8.75625 35.1417 8.25 34.5 8.25H13.5Z"></path>
+                  </svg>
+                </button>
+              </div>
+
+              <!-- Character & Hashtag Counters -->
+              <div class="editor-counters">
+                <div class="counter-item">
+                  <span id="hashtagCounter">0/30 #</span>
+                </div>
+                <div class="counter-item">
+                  <span id="charCounter">0/2200</span>
+                  <i class="fa-brands fa-instagram text-base text-pink-600"></i>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Expansion Accordion Panels -->
+        <div class="accordions-section">
+          
+          <!-- Accordion 1: Predefinições globais -->
+          <div class="accordion-card">
+            <button type="button" class="accordion-header">
+              <div class="accordion-title-left">
+                <i class="fa-solid fa-gear text-gray-700 text-base"></i>
+                <span>Predefinições globais</span>
+              </div>
+              <div class="accordion-title-right">
+                <div class="mc-switch-wrap">
+                  <span class="switch-label-text">Publicação automática</span>
+                  <label class="custom-switch">
+                    <input type="checkbox" checked id="switchAutoPublish">
+                    <span class="switch-slider"></span>
+                  </label>
+                  <i class="fa-solid fa-circle-question text-gray-400 text-xs cursor-pointer ml-1" title="Publica automaticamente no horário agendado"></i>
+                </div>
+                <i class="fas fa-chevron-down chevron-icon"></i>
+              </div>
+            </button>
+            <div class="accordion-body">
+              <div class="flex flex-col gap-2 text-xs text-gray-600">
+                <div class="flex items-center justify-between py-1">
+                  <span>Encurtar links automaticamente</span>
+                  <input type="checkbox" checked class="rounded text-blue-600">
+                </div>
+                <div class="flex items-center justify-between py-1">
+                  <span>Notificar por e-mail em caso de erro</span>
+                  <input type="checkbox" checked class="rounded text-blue-600">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Accordion 2: Predefinições do Instagram -->
+          <div class="accordion-card">
+            <button type="button" class="accordion-header">
+              <div class="accordion-title-left">
+                <i class="fa-brands fa-instagram text-pink-600 text-lg"></i>
+                <span>Predefinições do Instagram</span>
+                <span class="badge-new">Novo</span>
+              </div>
+              <div class="accordion-title-right">
+                <i class="fas fa-chevron-down chevron-icon"></i>
+              </div>
+            </button>
+            <div class="accordion-body">
+              <div class="flex flex-col gap-3 text-xs text-gray-600">
+                <div class="flex items-center justify-between">
+                  <span>Compartilhar também no Feed principal</span>
+                  <input type="checkbox" checked class="rounded text-blue-600">
+                </div>
+                <div class="flex items-center justify-between">
+                  <span>Permitir remixagem de Reels</span>
+                  <input type="checkbox" checked class="rounded text-blue-600">
+                </div>
+                <div class="flex items-center justify-between">
+                  <span>Marcar pessoas ou colaboradores</span>
+                  <button type="button" class="text-blue-600 font-medium hover:underline">+ Marcar</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Warning Accordion: 1 aviso: 1 (Screenshot 3) -->
+          <div class="warning-accordion-card" id="warningAccordionCard">
+            <button type="button" class="warning-accordion-header" id="btnToggleWarning">
+              <div class="warning-title-left">
+                <i class="fa-solid fa-circle-info text-gray-700"></i>
+                <span>1 aviso: 1</span>
+              </div>
+              <div class="accordion-title-right">
+                <i class="fas fa-chevron-up chevron-icon text-xs text-gray-500" id="warningChevron"></i>
+              </div>
+            </button>
+            <div class="warning-accordion-body" id="warningAccordionBody">
+              <i class="fa-brands fa-instagram text-pink-600 text-base shrink-0 mt-0.5"></i>
+              <div>
+                <span>Publicação automática (teste reel) → Se você tiver menos de 1000 seguidores, o post da fileira de teste pode falhar.</span>
+                <a href="#" class="ml-1" onclick="alert('Consulte as diretrizes do Meta para permissões de Reels.'); return false;">Como verificar se o Meta lhe concedeu acesso.</a>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Footer / Action Bar -->
+        <footer class="planner-footer">
+          <div>
+            <button type="button" class="btn-cancel" id="btnCancelPost">Cancelar</button>
+          </div>
+          <div class="footer-actions-right">
+            <!-- Datetime Picker Trigger -->
+            <button type="button" class="btn-datetime-picker" id="btnDateTime">
+              <i class="fa-regular fa-calendar"></i>
+              <span id="displayDate">22 set 2026 8:49</span>
+            </button>
+
+            <!-- Schedule Split Button -->
+            <div class="btn-split-schedule">
+              <button type="button" class="btn-schedule-main" id="btnSchedule">Agendamento</button>
+              <button type="button" class="btn-schedule-dropdown" id="btnScheduleDropdown" aria-label="Opções de agendamento">
+                <i class="fa-solid fa-chevron-down text-xs"></i>
+              </button>
+            </div>
+          </div>
+        </footer>
+
+      </section>
+
+      <!-- RIGHT COLUMN: Instagram Live Preview Mockup (42%) -->
+      <section class="planner-right-column" id="plannerRightCol">
+        
+        <!-- Preview Top Bar -->
+        <div class="preview-top-toolbar">
+          <div class="flex items-center gap-2">
+            <button type="button" class="preview-network-btn" title="Instagram">
+              <i class="fa-brands fa-instagram text-lg"></i>
+            </button>
+          </div>
+
+          <div class="preview-view-toggle-group">
+            <div class="preview-view-toggle">
+              <button type="button" class="toggle-view-btn" id="toggleViewEye" title="Ocultar/Exibir elementos">
+                <i class="fa-solid fa-eye"></i>
+              </button>
+              <button type="button" class="toggle-view-btn active" id="toggleViewMobile" title="Visualização Mobile">
+                <i class="fa-solid fa-mobile-screen"></i>
+              </button>
+              <button type="button" class="toggle-view-btn" id="toggleViewDesktop" title="Visualização Desktop">
+                <i class="fa-solid fa-desktop"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Feed Grid Toggle Button (Screenshot 3) -->
+        <button type="button" class="btn-grid-preview" id="btnGridPreview" title="Alternar visualização em grade do perfil">
+          <i class="fa-solid fa-table-cells text-sm"></i>
+        </button>
+
+        <!-- Mockup Stage -->
+        <div class="preview-mockup-stage">
+          
+          <!-- Instagram Reel Phone Frame -->
+          <div class="instagram-reel-phone" id="reelPhoneFrame">
+            
+            <!-- Top Controls Overlay -->
+            <div class="reels-top-bar">
+              <i class="fa-solid fa-chevron-left text-base cursor-pointer"></i>
+              <span class="reels-top-title">Reels</span>
+              <i class="fa-solid fa-camera text-lg cursor-pointer"></i>
+            </div>
+
+            <!-- Media / Video Canvas Area -->
+            <div class="reels-media-layer" id="previewMediaLayer">
+              <!-- Empty state placeholder (if media is removed) -->
+              <div class="media-empty-placeholder hidden" id="mediaEmptyPlaceholder">
+                <i class="fa-solid fa-circle-play text-4xl opacity-50"></i>
+                <span>Vídeo indisponível</span>
+              </div>
+
+              <!-- Uploaded Image Preview -->
+              <img id="previewImage" class="reels-active-media hidden" alt="Pré-visualização">
+
+              <!-- Active Video Element (CLIP6.mp4 sem autoplay) -->
+              <video id="previewVideo" class="reels-active-media" loop playsinline muted src="assets/CLIP6.mp4" style="display: block;"></video>
+
+              <!-- Video Center Playback Controls Overlay (Screenshot 3) -->
+              <div class="reels-video-controls-overlay" id="videoControlsOverlay">
+                <!-- Video Buttons (Rewind, Play/Pause, Forward) -->
+                <div class="reels-playback-buttons">
+                  <button type="button" class="btn-reel-ctrl text-xl" id="btnReelRewind" title="Voltar 5 segundos">
+                    <i class="fa-solid fa-backward-step"></i>
+                  </button>
+                  <button type="button" class="btn-reel-ctrl btn-reel-play-circle" id="btnReelPlayPause" title="Reproduzir / Pausar">
+                    <i class="fa-solid fa-play ml-1" id="reelPlayIcon"></i>
+                  </button>
+                  <button type="button" class="btn-reel-ctrl text-xl" id="btnReelForward" title="Avançar 5 segundos">
+                    <i class="fa-solid fa-forward-step"></i>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Gradient Shadow for readability -->
+              <div class="reels-shadow-gradient"></div>
+            </div>
+
+            <!-- Bottom & Side Reels Overlay -->
+            <div class="reels-overlay-content">
+              
+              <!-- Left: User info, caption, audio -->
+              <div class="reels-info-column">
+                <div class="reels-user-row">
+                  <div class="reels-avatar">
+                    <img src="assets/avatar.jpg" alt="Alessandra Santoro" onerror="this.src='https://ui-avatars.com/api/?name=Alessandra+Santoro&background=0284c7&color=fff'">
+                  </div>
+                  <span class="reels-username">alesantorooficial</span>
+                </div>
+
+                <!-- Live Synchronized Caption -->
+                <div class="reels-caption-text" id="previewCaption" style="display: none;"></div>
+
+                <!-- Audio Marquee Badge (Screenshot 3) -->
+                <div class="reels-audio-pill">
+                  <i class="fa-solid fa-music text-[9px]"></i>
+                  <div class="marquee-container">
+                    <span class="marquee-content" id="audioTrackTitle">original</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Right: Reel Vertical Action Bar (Screenshot 3) -->
+              <div class="reels-actions-column">
+                <div class="reel-action-btn">
+                  <i class="fa-regular fa-heart"></i>
+                  <span>0</span>
+                </div>
+                <div class="reel-action-btn">
+                  <i class="fa-regular fa-comment -scale-x-100"></i>
+                  <span>0</span>
+                </div>
+                <div class="reel-action-btn">
+                  <i class="fa-regular fa-paper-plane"></i>
+                  <span>0</span>
+                </div>
+                <div class="reel-action-btn">
+                  <i class="fa-solid fa-ellipsis"></i>
+                </div>
+                <!-- Profile Audio Vinyl Disc -->
+                <div class="reel-sound-disc">
+                  <img src="assets/avatar.jpg" alt="Audio Disc">
+                  <div class="disc-music-badge">
+                    <i class="fa-solid fa-music"></i>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Preview Disclaimer Alert (Screenshot 3) -->
+        <div class="preview-disclaimer-alert">
+          <i class="fa-solid fa-circle-info"></i>
+          <span>Pré-visualizações são uma aproximação de como será a sua publicação quando for publicada. A publicação final pode parecer um pouco diferente.</span>
+        </div>
+
+      </main>
+    </div>
+
+    <!-- VIEW 2: Agendamentos & Calendário Completo -->
+    <div class="app-view" id="viewAgendamentos">
+      <div class="agendamentos-container">
+        
+        <!-- Agendamentos Toolbar -->
+        <div class="agendamentos-toolbar">
+          <div class="flex items-center gap-4 flex-wrap">
+            <!-- Month & Year Navigator -->
+            <div class="calendar-month-selector">
+              <button type="button" class="btn-cal-nav" id="btnCalPrevMonth" title="Mês anterior">
+                <i class="fa-solid fa-chevron-left text-xs"></i>
+              </button>
+              <div class="calendar-current-month" id="calendarCurrentMonthLabel">Setembro 2026</div>
+              <button type="button" class="btn-cal-nav" id="btnCalNextMonth" title="Próximo mês">
+                <i class="fa-solid fa-chevron-right text-xs"></i>
+              </button>
+              <button type="button" class="btn-cal-today ml-1" id="btnCalToday">Hoje</button>
+            </div>
+
+            <!-- Filter by Post Type -->
+            <div class="calendar-filters-group">
+              <button type="button" class="filter-pill active" data-filter="all">Todos</button>
+              <button type="button" class="filter-pill" data-filter="reel">Reels</button>
+              <button type="button" class="filter-pill" data-filter="post">Posts</button>
+              <button type="button" class="filter-pill" data-filter="story">Stories</button>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <!-- View Mode Toggle (Calendário / Lista) -->
+            <div class="view-mode-toggle">
+              <button type="button" class="btn-mode-toggle active" id="btnModeCalendar">
+                <i class="fa-solid fa-calendar-days mr-1"></i> Calendário
+              </button>
+              <button type="button" class="btn-mode-toggle" id="btnModeList">
+                <i class="fa-solid fa-list-ul mr-1"></i> Lista
+              </button>
+            </div>
+
+            <!-- New Schedule Button -->
+            <button type="button" class="btn-new-schedule" id="btnGoToPlanner">
+              <i class="fa-solid fa-plus text-xs"></i>
+              <span>Novo Agendamento</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 1. Calendar Month Grid View -->
+        <div class="calendar-grid-wrapper" id="calendarGridView">
+          <div class="calendar-header-row">
+            <div class="calendar-day-name">Dom</div>
+            <div class="calendar-day-name">Seg</div>
+            <div class="calendar-day-name">Ter</div>
+            <div class="calendar-day-name">Qua</div>
+            <div class="calendar-day-name">Qui</div>
+            <div class="calendar-day-name">Sex</div>
+            <div class="calendar-day-name">Sáb</div>
+          </div>
+          <div class="calendar-month-grid" id="calendarMonthGrid">
+            <!-- Renderizado dinamicamente pelo JavaScript com os agendamentos -->
+          </div>
+        </div>
+
+        <!-- 2. List View (Table) -->
+        <div class="calendar-grid-wrapper hidden" id="calendarListView">
+          <div class="schedule-table-wrap">
+            <table class="schedule-table">
+              <thead>
+                <tr>
+                  <th style="width: 70px;">Capa</th>
+                  <th style="width: 140px;">Tipo</th>
+                  <th style="width: 170px;">Data & Horário</th>
+                  <th style="width: 150px;">Rede</th>
+                  <th>Legenda / Conteúdo</th>
+                  <th style="width: 110px;">Status</th>
+                  <th style="width: 110px; text-align: right;">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="scheduleTableBody">
+                <!-- Preenchido dinamicamente -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Modal: Post Details & Preview (Ao clicar em um agendamento) -->
+  <div class="fixed inset-0 bg-black/60 z-50 hidden items-center justify-center p-4 backdrop-blur-sm" id="postDetailModal">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col">
+      <div class="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+        <div class="flex items-center gap-2">
+          <i class="fa-brands fa-instagram text-pink-600 text-lg"></i>
+          <span class="font-bold text-gray-900 text-sm" id="modalDetailType">Reels de teste</span>
+          <span class="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-semibold" id="modalDetailStatus">Agendado</span>
+        </div>
+        <button type="button" class="text-gray-400 hover:text-gray-600" onclick="document.getElementById('postDetailModal').classList.remove('active')">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+      <div class="p-5 flex flex-col gap-4 max-h-[80vh] overflow-y-auto">
+        <!-- Media Preview / Capa -->
+        <div class="w-full bg-black rounded-xl overflow-hidden aspect-[9/16] max-h-[300px] flex items-center justify-center">
+          <video id="modalDetailVideo" class="w-full h-full object-contain hidden" controls></video>
+          <img id="modalDetailImage" class="w-full h-full object-contain hidden" alt="Capa">
+        </div>
+        <!-- Time & Account -->
+        <div class="flex items-center justify-between text-xs text-gray-500 bg-gray-50 p-3 rounded-lg border border-gray-100">
+          <div class="flex items-center gap-2 font-semibold text-gray-800">
+            <i class="fa-solid fa-calendar-check text-blue-600 text-sm"></i>
+            <span id="modalDetailDateTime">22 set 2026 8:49</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <img src="assets/avatar.jpg" class="w-5 h-5 rounded-full object-cover">
+            <span class="font-medium text-gray-700">alesantorooficial</span>
+          </div>
+        </div>
+        <!-- Caption -->
+        <div>
+          <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Legenda da Publicação</label>
+          <p class="text-sm text-gray-800 bg-white p-3 rounded-lg border border-gray-200 whitespace-pre-wrap leading-relaxed" id="modalDetailCaption"></p>
+        </div>
+      </div>
+      <div class="p-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-2">
+        <button type="button" class="px-4 py-2 rounded-lg text-sm font-semibold bg-gray-200 text-gray-700 hover:bg-gray-300" onclick="document.getElementById('postDetailModal').classList.remove('active')">Fechar</button>
+        <button type="button" class="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700" id="btnEditFromModal">
+          <i class="fa-solid fa-pen mr-1.5 text-xs"></i> Abrir no Editor
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hashtags Autocomplete List Dropdown (Screenshot 2) -->
+  <div class="hashtags-autocomplete-card" id="hashtagsAutocompleteCard">
+    <div class="hashtag-row-item" data-tag="#love">
+      <span class="hashtag-row-name">#love</span>
+      <span class="hashtag-row-count">2.1MM</span>
+    </div>
+    <div class="hashtag-row-item" data-tag="#instagood">
+      <span class="hashtag-row-name">#instagood</span>
+      <span class="hashtag-row-count">1.26MM</span>
+    </div>
+    <div class="hashtag-row-item" data-tag="#fashion">
+      <span class="hashtag-row-name">#fashion</span>
+      <span class="hashtag-row-count">899.66M</span>
+    </div>
+    <div class="hashtag-row-item" data-tag="#photooftheday">
+      <span class="hashtag-row-name">#photooftheday</span>
+      <span class="hashtag-row-count">872.09M</span>
+    </div>
+    <div class="hashtag-row-item" data-tag="#art">
+      <span class="hashtag-row-name">#art</span>
+      <span class="hashtag-row-count">802.35M</span>
+    </div>
+    <div class="hashtag-row-item" data-tag="#beautiful">
+      <span class="hashtag-row-name">#beautiful</span>
+      <span class="hashtag-row-count">710.1M</span>
+    </div>
+    <div class="hashtag-row-item" data-tag="#photography">
+      <span class="hashtag-row-name">#photography</span>
+      <span class="hashtag-row-count">684.41M</span>
+    </div>
+    <div class="hashtag-row-item" data-tag="#picoftheday">
+      <span class="hashtag-row-name">#picoftheday</span>
+      <span class="hashtag-row-count">652.27M</span>
+    </div>
+    <div class="hashtag-row-item" data-tag="#followforfollowback">
+      <span class="hashtag-row-name">#follow...</span>
+      <span class="hashtag-row-count">650.56M</span>
+    </div>
+    <div class="hashtag-row-item" data-tag="#happy">
+      <span class="hashtag-row-name">#happy</span>
+      <span class="hashtag-row-count">640.12M</span>
+    </div>
+    <div class="hashtag-row-item" data-tag="#cute">
+      <span class="hashtag-row-name">#cute</span>
+      <span class="hashtag-row-count">620.45M</span>
+    </div>
+    <div class="hashtag-row-item" data-tag="#reels">
+      <span class="hashtag-row-name">#reels</span>
+      <span class="hashtag-row-count">590.20M</span>
+    </div>
+    <div class="hashtag-row-item" data-tag="#instagram">
+      <span class="hashtag-row-name">#instagram</span>
+      <span class="hashtag-row-count">550.80M</span>
+    </div>
+  </div>
+
+  <!-- Popover: Emoji Picker -->
+  <div class="popover-menu" id="emojiPickerPopover">
+    <div class="text-xs font-semibold text-gray-500 uppercase px-2 mb-2 tracking-wider">Emojis rápidos</div>
+    <div class="emoji-grid"></div>
+  </div>
+
+  <!-- Popover: Schedule Options Menu -->
+  <div class="popover-menu" id="scheduleMenu" style="width: 190px;">
+    <div class="py-1">
+      <button type="button" class="schedule-option-item w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2" data-mode="schedule">
+        <i class="fa-solid fa-calendar-check text-blue-600"></i> Agendamento
+      </button>
+      <button type="button" class="schedule-option-item w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2" data-mode="publish_now">
+        <i class="fa-solid fa-paper-plane text-emerald-600"></i> Publicar agora
+      </button>
+      <button type="button" class="schedule-option-item w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-2" data-mode="draft">
+        <i class="fa-solid fa-floppy-disk text-gray-500"></i> Salvar rascunho
+      </button>
+    </div>
+  </div>
+
+  <!-- Modal: Date & Time Picker -->
+  <div class="fixed inset-0 bg-black/50 z-50 hidden items-center justify-center p-4 backdrop-blur-sm" id="datePickerModal">
+    <div class="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="font-bold text-gray-900 text-lg flex items-center gap-2">
+          <i class="fa-solid fa-calendar text-blue-600"></i> Agendar Publicação
+        </h3>
+        <button type="button" class="text-gray-400 hover:text-gray-600" id="btnCloseDatePicker">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+      <div class="flex flex-col gap-4">
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">Data</label>
+          <input type="date" id="scheduledDateInput" value="2026-09-22" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">Horário</label>
+          <input type="time" id="scheduledTimeInput" value="08:49" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div class="flex justify-end gap-2 mt-2">
+          <button type="button" class="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200" onclick="document.getElementById('datePickerModal').classList.remove('active')">Cancelar</button>
+          <button type="button" class="px-5 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700" id="btnApplyDate">Confirmar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: First Comment -->
+  <div class="fixed inset-0 bg-black/50 z-50 hidden items-center justify-center p-4 backdrop-blur-sm" id="firstCommentModal">
+    <div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
+      <div class="flex justify-between items-center mb-3">
+        <h3 class="font-bold text-gray-900 text-base flex items-center gap-2">
+          <i class="fa-solid fa-comment text-blue-600"></i> Primeiro Comentário
+        </h3>
+        <button type="button" class="text-gray-400 hover:text-gray-600" id="btnCloseFirstComment">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+      <p class="text-xs text-gray-500 mb-3">Este comentário será publicado automaticamente junto com o seu post.</p>
+      <textarea id="firstCommentInput" rows="4" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Escreva aqui o seu primeiro comentário (ex: links, hashtags adicionais)..."></textarea>
+      <div class="flex justify-end gap-2 mt-4">
+        <button type="button" class="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200" onclick="document.getElementById('firstCommentModal').classList.remove('active')">Cancelar</button>
+        <button type="button" class="px-5 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700" id="btnSaveFirstComment">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Observações (Notes) -->
+  <div class="fixed inset-0 bg-black/50 z-50 hidden items-center justify-center p-4 backdrop-blur-sm" id="notesModal">
+    <div class="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
+      <div class="flex justify-between items-center mb-3">
+        <h3 class="font-bold text-gray-900 text-base flex items-center gap-2">
+          <i class="fa-solid fa-note-sticky text-amber-500"></i> Observações Internas
+        </h3>
+        <button type="button" class="text-gray-400 hover:text-gray-600" id="btnCloseNotes">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+      <p class="text-xs text-gray-500 mb-3">Notas internas visíveis apenas pela equipe no planejador.</p>
+      <textarea id="notesInput" rows="4" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" placeholder="Insira notas sobre a campanha, aprovação de cliente, etc..."></textarea>
+      <div class="flex justify-end gap-2 mt-4">
+        <button type="button" class="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200" onclick="document.getElementById('notesModal').classList.remove('active')">Fechar</button>
+        <button type="button" class="px-5 py-2 rounded-lg text-sm font-medium bg-amber-600 text-white hover:bg-amber-700" id="btnSaveNotes">Salvar Notas</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Modal Dialog Helper Styles -->
+  <style>
+    .fixed.active {
+      display: flex !important;
+    }
+  </style>
+
+  <!-- Application Logic -->
+  <script src="js/app.js"></script>
+</body>
+</html>
