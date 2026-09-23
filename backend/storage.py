@@ -57,6 +57,7 @@ class StoryStore:
         allowed = {
             "type", "media_filename", "media_kind", "caption", "scheduled_at",
             "status", "instagram_media_id", "container_id", "graduation_strategy", "error",
+            "media_sha256",
         }
         record = {key: value for key, value in payload.items() if key in allowed and value is not None}
         record_type = record.get("type", "story")

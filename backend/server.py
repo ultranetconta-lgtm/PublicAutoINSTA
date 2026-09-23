@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import mimetypes
 import os
@@ -43,6 +44,10 @@ ANALYTICS_CACHE_TTL_SECONDS = 20.0
 ANALYTICS_META_CONCURRENCY = 5
 ANALYTICS_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+DUPLICATE_REEL_MESSAGE = (
+    "Este Reel já foi enviado ou agendado. Para evitar uma publicação duplicada, "
+    "o servidor bloqueou um novo envio."
+)
 SUPPORTED_TYPES = {
     "image/jpeg": ("image", ".jpg"),
     "image/jpg": ("image", ".jpg"),
@@ -290,6 +295,7 @@ class StoryApplication:
         )
         self.media_probe = media_probe or verify_public_media
         self.video_converter = video_converter or normalize_reel_video
+        self._reel_submit_lock = threading.Lock()
         self._analytics_snapshot_lock = threading.Lock()
         self._analytics_snapshot: tuple[float, dict, list[dict]] | None = None
         self.store.recover_processing()
@@ -359,6 +365,34 @@ class StoryApplication:
             raise
         return filename, media_url
 
+    @staticmethod
+    def _sha256_file(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as media_file:
+            for chunk in iter(lambda: media_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def _is_duplicate_reel(self, media_sha256: str, *, exclude_schedule_ids: set[str] | None = None) -> bool:
+        excluded = exclude_schedule_ids or set()
+        for record in self.store.list_schedules():
+            if record.get("id") in excluded:
+                continue
+            if record.get("type") not in {"reel", "test_reel"} or record.get("media_kind") != "video":
+                continue
+            existing_sha256 = record.get("media_sha256")
+            if not existing_sha256:
+                filename = Path(record.get("media_filename", "")).name
+                if not filename:
+                    continue
+                existing_path = self.uploads_path / filename
+                if not existing_path.is_file():
+                    continue
+                existing_sha256 = self._sha256_file(existing_path)
+            if existing_sha256 == media_sha256:
+                return True
+        return False
+
     def create_story(self, fields: dict, media: dict | None) -> dict:
         action, media_kind, scheduled_at = validate_story_request(fields, media)
         self._require_publish_configuration()
@@ -391,6 +425,10 @@ class StoryApplication:
         ) or record
 
     def create_reel(self, fields: dict, media: dict | None) -> dict:
+        with self._reel_submit_lock:
+            return self._create_reel_once(fields, media)
+
+    def _create_reel_once(self, fields: dict, media: dict | None) -> dict:
         action, graduation_strategy = validate_reel_request(fields, media)
         if not media:
             raise ValueError("media_required")
@@ -411,11 +449,23 @@ class StoryApplication:
                 raise ValueError("scheduled_at_timezone_required")
             if scheduled_at <= datetime.now(timezone.utc):
                 raise ValueError("scheduled_at_must_be_future")
-        filename, media_url = self._save_public_media(media, ".mp4", normalize_video=True)
+        filename = self._save_media(media, ".mp4")
+        media_path = self.uploads_path / filename
+        try:
+            self.video_converter(media_path)
+            media_sha256 = self._sha256_file(media_path)
+            if self._is_duplicate_reel(media_sha256):
+                raise ValueError("duplicate_reel")
+            media_url = build_public_media_url(self.config.public_base_url, filename)
+            self.media_probe(media_url, media_path.stat().st_size)
+        except Exception:
+            media_path.unlink(missing_ok=True)
+            raise
         record_payload = {
             "type": "test_reel",
             "media_filename": filename,
             "media_kind": media_kind,
+            "media_sha256": media_sha256,
             "caption": fields.get("caption", "").strip(),
             "graduation_strategy": graduation_strategy,
             "scheduled_at": scheduled_at.isoformat() if scheduled_at else utc_now_iso(),
@@ -445,9 +495,28 @@ class StoryApplication:
 
     def run_due_schedules(self) -> int:
         claimed = self.store.claim_due(datetime.now(timezone.utc))
+        claimed_ids = {record.get("id") for record in claimed}
+        claimed_reel_hashes: set[str] = set()
+        claimed.sort(key=lambda record: (record.get("scheduled_at", ""), record.get("created_at", "")))
         completed = 0
         for record in claimed:
             try:
+                if record.get("type") == "test_reel":
+                    media_path = self.uploads_path / record["media_filename"]
+                    media_sha256 = record.get("media_sha256") or self._sha256_file(media_path)
+                    if (
+                        media_sha256 in claimed_reel_hashes
+                        or self._is_duplicate_reel(media_sha256, exclude_schedule_ids=claimed_ids)
+                    ):
+                        self.store.update_schedule(record["id"], {
+                            "status": "failed",
+                            "error": DUPLICATE_REEL_MESSAGE,
+                            "media_sha256": media_sha256,
+                        })
+                        continue
+                    claimed_reel_hashes.add(media_sha256)
+                    if not record.get("media_sha256"):
+                        self.store.update_schedule(record["id"], {"media_sha256": media_sha256})
                 self._require_publish_configuration()
                 media_url = build_public_media_url(self.config.public_base_url, record["media_filename"])
                 self.media_probe(media_url, (self.uploads_path / record["media_filename"]).stat().st_size)
@@ -689,6 +758,12 @@ class PlannerHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
+    @staticmethod
+    def _public_schedule(record: dict | None) -> dict | None:
+        if record is None:
+            return None
+        return {key: value for key, value in record.items() if key != "media_sha256"}
+
     def _read_body(self) -> bytes:
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
@@ -709,7 +784,8 @@ class PlannerHandler(SimpleHTTPRequestHandler):
             self._send_json(HTTPStatus.OK, self.application.health())
             return
         if path == "/api/schedules":
-            self._send_json(HTTPStatus.OK, {"schedules": self.application.store.list_schedules()})
+            schedules = self.application.store.list_schedules()
+            self._send_json(HTTPStatus.OK, {"schedules": [self._public_schedule(record) for record in schedules]})
             return
         if path == "/api/analytics":
             query_params = parse_qs(urlparse(self.path).query)
@@ -774,16 +850,21 @@ class PlannerHandler(SimpleHTTPRequestHandler):
                 if route_path == "/api/reels"
                 else self.application.create_story(fields, media)
             )
-            self._send_json(HTTPStatus.CREATED, {"story": result})
+            self._send_json(HTTPStatus.CREATED, {"story": self._public_schedule(result)})
         except PublishRequestError as exc:
             self._send_json(HTTPStatus.BAD_GATEWAY, {
                 "error": exc.code,
                 "message": str(exc),
-                "story": exc.record,
+                "story": self._public_schedule(exc.record),
             })
         except ValueError as exc:
             code = str(exc)
-            status = HTTPStatus.REQUEST_ENTITY_TOO_LARGE if code == "upload_too_large" else HTTPStatus.BAD_REQUEST
+            if code == "upload_too_large":
+                status = HTTPStatus.REQUEST_ENTITY_TOO_LARGE
+            elif code == "duplicate_reel":
+                status = HTTPStatus.CONFLICT
+            else:
+                status = HTTPStatus.BAD_REQUEST
             self._send_json(status, {"error": code, "message": self._friendly_error(code)})
         except Exception as exc:  # pragma: no cover - last-resort API boundary
             self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "internal_error", "message": str(exc)})
@@ -816,7 +897,7 @@ class PlannerHandler(SimpleHTTPRequestHandler):
             if updated is None:
                 self._send_json(HTTPStatus.CONFLICT, {"error": "schedule_not_editable"})
                 return
-            self._send_json(HTTPStatus.OK, {"schedule": updated})
+            self._send_json(HTTPStatus.OK, {"schedule": self._public_schedule(updated)})
         except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             code = "invalid_schedule_update" if isinstance(exc, json.JSONDecodeError) else str(exc) or "invalid_schedule_update"
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": code, "message": self._friendly_error(code)})
@@ -836,6 +917,7 @@ class PlannerHandler(SimpleHTTPRequestHandler):
     def _friendly_error(code: str) -> str:
         messages = {
             "media_required": "Selecione uma imagem JPG ou vídeo MP4 para o Story.",
+            "duplicate_reel": DUPLICATE_REEL_MESSAGE,
             "public_media_not_configured": "Configure PUBLIC_BASE_URL com uma URL HTTPS pública para o Meta acessar a mídia.",
             "meta_not_configured": "Configure o token e o Instagram User ID no backend.",
             "reel_video_required": "Selecione um vídeo MP4 para o Reel de teste.",

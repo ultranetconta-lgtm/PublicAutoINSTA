@@ -45,4 +45,6 @@ Para um Story, o backend cria um container `STORIES` com `image_url` ou `video_u
 
 Para Reels de teste, o backend cria um container `REELS` com `trial_params`, consulta `status_code,status` e só chama `media_publish` após `FINISHED`. Se a Meta retornar `ERROR` ou `EXPIRED`, o agendamento falho guarda o ID do contêiner e o texto de `status` retornado pela Meta. Nenhum token é salvo nesse registro.
 
+Antes de enviar um Reel à Meta, o backend normaliza o vídeo e compara seu SHA-256 com os Reels já registrados. Uma mídia repetida é recusada com HTTP 409. O worker também evita publicar Reels duplicados que já estavam na fila antes desta proteção.
+
 Um teste real de `Publicar agora` altera a conta do Instagram e deve ser feito somente com a mídia e o horário autorizados pelo usuário naquele momento.
