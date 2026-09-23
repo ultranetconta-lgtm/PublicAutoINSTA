@@ -681,6 +681,21 @@
   gap: 5px;
 }
 
+.apple-chart-tooltip-time {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  color: var(--apple-text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.apple-chart-tooltip-time i {
+  flex: 0 0 auto;
+  color: var(--apple-blue);
+}
+
 /* Rich Reel Detail Popover */
 .apple-reel-popover {
   position: fixed;

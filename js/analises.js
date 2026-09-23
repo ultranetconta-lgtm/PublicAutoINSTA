@@ -16,6 +16,7 @@
     chartMouseEvent: null,
     chartMouseFrame: null,
     chartLastPointIndex: -1,
+    chartTooltipHalfWidth: 85,
 
     init() {
       if (this.initialized) {
@@ -480,6 +481,7 @@
         width: container.clientWidth || 800
       };
       this.chartLastPointIndex = -1;
+      this.chartTooltipHalfWidth = 85;
 
       const crosshair = container.querySelector('#appleChartCrosshair');
       if (crosshair) crosshair.style.opacity = '0';
@@ -526,6 +528,21 @@
           if (this.chartLastPointIndex !== pointIndex) {
             const viewsFmt = Number(closest.point.views).toLocaleString('pt-BR');
             const reelCount = closest.point.reels ? closest.point.reels.length : 0;
+            const timezone = this.currentData?.timezone || 'America/Sao_Paulo';
+            const formatTime = (value) => {
+              if (!value) return null;
+              const normalizedTimestamp = String(value).replace(/([+-]\d{2})(\d{2})$/, '$1:$2');
+              const timestamp = new Date(normalizedTimestamp);
+              return Number.isNaN(timestamp.getTime())
+                ? null
+                : timestamp.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: timezone });
+            };
+            const reelTimes = (closest.point.reels || [])
+              .map(reel => ({ timestamp: new Date(String(reel.timestamp || '').replace(/([+-]\d{2})(\d{2})$/, '$1:$2')), label: formatTime(reel.timestamp) }))
+              .filter(reel => reel.label && !Number.isNaN(reel.timestamp.getTime()))
+              .sort((a, b) => a.timestamp - b.timestamp)
+              .map(reel => reel.label);
+            const updatedTime = closest.point.partial ? formatTime(this.currentData?.updated_at) : null;
             tooltip.innerHTML = `
               <div class="apple-chart-tooltip-date">${closest.point.label}</div>
               <div class="apple-chart-tooltip-views">
@@ -534,13 +551,17 @@
               </div>
               ${closest.point.partial ? '<div class="text-[11px] text-gray-500 mt-1">Valor parcial de hoje</div>' : ''}
               ${reelCount ? `<div class="text-[11px] text-purple-600 font-semibold mt-1 flex items-center gap-1"><i class="fa-solid fa-clapperboard text-[10px]"></i> ${reelCount} Reel(s) publicado(s)</div>` : ''}
+              ${reelTimes.length ? `<div class="apple-chart-tooltip-time"><i class="fa-regular fa-clock" aria-hidden="true"></i><span>Reels às ${reelTimes.join(' · ')} (Brasília)</span></div>` : ''}
+              ${updatedTime ? `<div class="apple-chart-tooltip-time"><i class="fa-regular fa-clock" aria-hidden="true"></i><span>Atualizado às ${updatedTime} (Brasília)</span></div>` : ''}
             `;
+            tooltip.classList.add('active');
+            this.chartTooltipHalfWidth = Math.max(85, tooltip.offsetWidth / 2);
             this.chartLastPointIndex = pointIndex;
           }
 
           // Keep geometry reads out of the high-frequency pointer path.
           let tooltipX = closest.x + 54;
-          const halfTooltipWidth = 85;
+          const halfTooltipWidth = this.chartTooltipHalfWidth;
           if (tooltipX - halfTooltipWidth < 10) {
             tooltipX = halfTooltipWidth + 10;
           } else if (tooltipX + halfTooltipWidth > interaction.width + 40) {
