@@ -984,14 +984,16 @@ document.addEventListener('DOMContentLoaded', () => {
         <td>
           <span class="schedule-status-badge text-xs font-semibold px-2 py-1 rounded-full ${scheduleStatusColor(post)}">${escapeHtml(post.status)}</span>
         </td>
-        <td style="text-align: right;">
+        <td class="schedule-actions-cell">
           ${isQuickEditing ? `
             <button type="button" class="btn-save-quick-edit px-2 py-1 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded" data-id="${escapeHtml(post.id)}">Salvar</button>
             <button type="button" class="btn-cancel-quick-edit px-2 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded" data-id="${escapeHtml(post.id)}">Cancelar</button>
           ` : `
-            <button type="button" class="btn-view-post px-2.5 py-1 text-xs font-semibold text-blue-600 hover:bg-blue-50 rounded" data-id="${escapeHtml(post.id)}">Ver</button>
-            ${canEditPost(post) ? `<button type="button" class="btn-quick-edit px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-100 rounded" data-id="${escapeHtml(post.id)}" title="Editar rápido" aria-label="Editar rápido"><i class="fa-solid fa-pen"></i></button>` : ''}
-            <button type="button" class="btn-delete-post px-2.5 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 rounded ml-1" data-id="${escapeHtml(post.id)}"><i class="fa-solid fa-trash-can"></i></button>
+            <div class="schedule-row-actions" role="group" aria-label="Ações da publicação">
+              <button type="button" class="schedule-row-action schedule-row-action-view btn-view-post" data-id="${escapeHtml(post.id)}">Ver</button>
+              ${canEditPost(post) ? `<button type="button" class="schedule-row-action schedule-row-action-edit btn-quick-edit" data-id="${escapeHtml(post.id)}" title="Editar rápido" aria-label="Editar publicação"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>` : ''}
+              <button type="button" class="schedule-row-action schedule-row-action-delete btn-delete-post" data-id="${escapeHtml(post.id)}" title="Excluir publicação" aria-label="Excluir publicação"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>
+            </div>
           `}
         </td>
       `;
