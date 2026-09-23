@@ -1,9 +1,10 @@
 .git/
 .DS_Store
+**/target
 api/.env*
 backend/data/*.json
 backend/uploads/*
-backend/test_*.py
+backend/*.py
 docs/
 midiaPost/
 __pycache__/
