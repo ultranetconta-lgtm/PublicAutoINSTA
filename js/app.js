@@ -715,19 +715,54 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
+  let backendSchedulesLoaded = false;
+  let scheduleSyncInFlight = false;
+
   async function loadSchedules() {
+    if (scheduleSyncInFlight) return;
+    scheduleSyncInFlight = true;
     try {
-      const response = await fetch('/api/schedules', { headers: { Accept: 'application/json' } });
+      const response = await fetch('/api/schedules', {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store'
+      });
       if (!response.ok) return;
       const payload = await response.json();
       if (Array.isArray(payload.schedules)) {
-        scheduledPosts = payload.schedules.map(normalizeBackendSchedule);
+        const receivedPosts = payload.schedules.map(normalizeBackendSchedule);
+        if (!backendSchedulesLoaded) {
+          scheduledPosts = receivedPosts;
+          backendSchedulesLoaded = true;
+          updateScheduleBadge();
+          renderCalendar();
+          renderListView();
+          return;
+        }
+
+        const knownIds = new Set(scheduledPosts.map(post => post.id));
+        const newScheduledPosts = receivedPosts.filter(post => (
+          post.backendStatus === 'scheduled' && !knownIds.has(post.id)
+        ));
+        if (newScheduledPosts.length === 0) return;
+
+        scheduledPosts = [...newScheduledPosts, ...scheduledPosts];
         updateScheduleBadge();
-        renderCalendar();
-        renderListView();
+        if (viewAgendamentos.classList.contains('active')) {
+          if (!calendarGridView.classList.contains('hidden')) {
+            newScheduledPosts.forEach(appendScheduleToCalendar);
+          }
+          if (!calendarListView.classList.contains('hidden')) {
+            appendScheduleRows(newScheduledPosts);
+          }
+        }
+        showToast(newScheduledPosts.length === 1
+          ? 'Novo agendamento recebido.'
+          : `${newScheduledPosts.length} novos agendamentos recebidos.`, 'info');
       }
     } catch (error) {
       // The planner still opens in mock mode when the backend is not running.
+    } finally {
+      scheduleSyncInFlight = false;
     }
   }
 
@@ -861,6 +896,40 @@ document.addEventListener('DOMContentLoaded', () => {
     renderListView();
   });
 
+  function calendarPostCardMarkup(post, isNew = false) {
+    let typeClass = 'type-pill-reel';
+    let typeIcon = 'fa-film';
+    if (post.type === 'test_reel') {
+      typeClass = 'type-pill-test';
+      typeIcon = 'fa-clapperboard';
+    } else if (post.type === 'post') {
+      typeClass = 'type-pill-post';
+      typeIcon = 'fa-table-cells';
+    } else if (post.type === 'story') {
+      typeClass = 'type-pill-story';
+      typeIcon = 'fa-circle-dot';
+    }
+
+    return `
+      <div class="schedule-card${isNew ? ' schedule-card-live-insert' : ''}" data-id="${escapeHtml(post.id)}">
+        <div class="schedule-card-thumb">
+          ${post.isVideo ? `<video src="${escapeHtml(post.media)}" muted></video>` : `<img src="${escapeHtml(post.media)}" alt="Capa">`}
+          <div class="thumb-type-icon">
+            <i class="fa-solid ${typeIcon}"></i>
+          </div>
+        </div>
+        <div class="schedule-card-details">
+          <div class="schedule-card-top-row">
+            <span class="schedule-card-time">${escapeHtml(post.time)}</span>
+            <i class="fa-brands fa-instagram schedule-card-network"></i>
+          </div>
+          <span class="schedule-card-type-pill ${typeClass}">${escapeHtml(post.typeLabel)}</span>
+          <div class="schedule-card-caption-preview">${escapeHtml(post.caption)}</div>
+        </div>
+      </div>
+    `;
+  }
+
   // --- Render Calendar Grid ---
   function renderCalendar() {
     calendarCurrentMonthLabel.innerText = `${monthNames[calCurrentMonth]} ${calCurrentYear}`;
@@ -891,48 +960,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const cell = document.createElement('div');
       cell.className = `calendar-cell ${isToday ? 'today' : ''}`;
+      cell.dataset.date = dateStr;
       
       const postsForDay = visiblePosts.filter(p => p.date === dateStr);
-
-      let postsHtml = '';
-      postsForDay.forEach(post => {
-        let typeClass = 'type-pill-reel';
-        let typeIcon = 'fa-film';
-        if (post.type === 'test_reel') {
-          typeClass = 'type-pill-test';
-          typeIcon = 'fa-clapperboard';
-        } else if (post.type === 'post') {
-          typeClass = 'type-pill-post';
-          typeIcon = 'fa-table-cells';
-        } else if (post.type === 'story') {
-          typeClass = 'type-pill-story';
-          typeIcon = 'fa-circle-dot';
-        }
-
-        postsHtml += `
-          <div class="schedule-card" data-id="${post.id}">
-            <div class="schedule-card-thumb">
-              ${post.isVideo ? `<video src="${post.media}" muted></video>` : `<img src="${post.media}" alt="Capa">`}
-              <div class="thumb-type-icon">
-                <i class="fa-solid ${typeIcon}"></i>
-              </div>
-            </div>
-            <div class="schedule-card-details">
-              <div class="schedule-card-top-row">
-                <span class="schedule-card-time">${post.time}</span>
-                <i class="fa-brands fa-instagram schedule-card-network"></i>
-              </div>
-              <span class="schedule-card-type-pill ${typeClass}">${post.typeLabel}</span>
-              <div class="schedule-card-caption-preview">${escapeHtml(post.caption)}</div>
-            </div>
-          </div>
-        `;
-      });
+      const postsHtml = postsForDay.map(post => calendarPostCardMarkup(post)).join('');
 
       cell.innerHTML = `
         <div class="cell-date-header">
           <span class="cell-day-num">${day}</span>
-          ${postsForDay.length > 0 ? `<span class="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full">${postsForDay.length}</span>` : ''}
+          ${postsForDay.length > 0 ? `<span class="calendar-day-count text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full">${postsForDay.length}</span>` : ''}
         </div>
         <div class="cell-posts-list">
           ${postsHtml}
@@ -956,30 +992,49 @@ document.addEventListener('DOMContentLoaded', () => {
       calendarMonthGrid.appendChild(cell);
     }
 
-    // Add click listeners to cards
-    document.querySelectorAll('.schedule-card').forEach(card => {
-      card.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const id = card.dataset.id;
-        const post = scheduledPosts.find(p => p.id === id);
-        if (post) openPostDetail(post);
-      });
-    });
   }
 
-  function getFilteredPosts() {
-    return scheduledPosts.filter(post => {
-      const statusKey = post.backendStatus || ({
+  function appendScheduleToCalendar(post) {
+    if (!postMatchesCurrentFilters(post)) return;
+    const cell = [...calendarMonthGrid.querySelectorAll('.calendar-cell[data-date]')]
+      .find(calendarCell => calendarCell.dataset.date === post.date);
+    if (!cell) return;
+
+    const cards = cell.querySelector('.cell-posts-list');
+    cards.insertAdjacentHTML('beforeend', calendarPostCardMarkup(post, true));
+    const count = cards.querySelectorAll('.schedule-card').length;
+    let countBadge = cell.querySelector('.calendar-day-count');
+    if (!countBadge) {
+      countBadge = document.createElement('span');
+      countBadge.className = 'calendar-day-count text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full';
+      cell.querySelector('.cell-date-header').appendChild(countBadge);
+    }
+    countBadge.innerText = count;
+  }
+
+  calendarMonthGrid.addEventListener('click', event => {
+    const card = event.target.closest('.schedule-card');
+    if (!card || !calendarMonthGrid.contains(card)) return;
+    event.stopPropagation();
+    const post = scheduledPosts.find(item => item.id === card.dataset.id);
+    if (post) openPostDetail(post);
+  });
+
+  function postMatchesCurrentFilters(post) {
+    const statusKey = post.backendStatus || ({
         Agendado: 'scheduled',
         Publicando: 'processing',
         Publicado: 'published',
         Falhou: 'failed'
       })[post.status] || 'scheduled';
-      if (!selectedStatusFilters.has(statusKey)) return false;
-      if (currentFilter === 'all') return true;
-      if (currentFilter === 'reel') return post.type === 'reel' || post.type === 'test_reel';
-      return post.type === currentFilter;
-    });
+    if (!selectedStatusFilters.has(statusKey)) return false;
+    if (currentFilter === 'all') return true;
+    if (currentFilter === 'reel') return post.type === 'reel' || post.type === 'test_reel';
+    return post.type === currentFilter;
+  }
+
+  function getFilteredPosts() {
+    return scheduledPosts.filter(postMatchesCurrentFilters);
   }
 
   // --- Render List View ---
@@ -1066,133 +1121,128 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function createScheduleTableRow(post, isNew = false) {
+    let typeClass = 'type-pill-reel';
+    if (post.type === 'test_reel') typeClass = 'type-pill-test';
+    else if (post.type === 'post') typeClass = 'type-pill-post';
+    else if (post.type === 'story') typeClass = 'type-pill-story';
+
+    const date = new Date(`${post.date}T${post.time}`);
+    const formattedDate = date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' });
+    const isQuickEditing = quickEditPostId === post.id;
+    const localDateTime = postLocalDateTime(post);
+    const tr = document.createElement('tr');
+    if (isNew) tr.classList.add('schedule-row-live-insert');
+    tr.innerHTML = `
+      <td>
+        <div class="table-thumb">
+          ${post.isVideo ? `<video src="${escapeHtml(post.media)}" muted></video>` : `<img src="${escapeHtml(post.media)}" alt="Capa">`}
+        </div>
+      </td>
+      <td>
+        <span class="schedule-card-type-pill ${typeClass} text-xs px-2 py-1">${escapeHtml(post.typeLabel)}</span>
+      </td>
+      <td>
+        ${isQuickEditing ? `
+          <label class="sr-only" for="quickEditDate-${escapeHtml(post.id)}">Data</label>
+          <input id="quickEditDate-${escapeHtml(post.id)}" type="date" class="mb-1 w-full rounded border border-gray-300 px-2 py-1 text-xs" value="${escapeHtml(localDateTime.date)}">
+          <label class="sr-only" for="quickEditTime-${escapeHtml(post.id)}">Horário</label>
+          <input id="quickEditTime-${escapeHtml(post.id)}" type="time" class="w-full rounded border border-gray-300 px-2 py-1 text-xs" value="${escapeHtml(localDateTime.time)}">
+        ` : `
+          <div class="font-semibold text-gray-900">${escapeHtml(post.time)}</div>
+          <div class="text-xs text-gray-500">${escapeHtml(formattedDate)}</div>
+        `}
+      </td>
+      <td>
+        <div class="flex items-center gap-1.5">
+          <i class="fa-brands fa-instagram text-pink-600 text-sm"></i>
+          <span class="text-xs font-semibold text-gray-800">alesantorooficial</span>
+        </div>
+      </td>
+      <td>
+        ${isQuickEditing ? `
+          <label class="sr-only" for="quickEditCaption-${escapeHtml(post.id)}">Legenda e hashtags</label>
+          <textarea id="quickEditCaption-${escapeHtml(post.id)}" rows="3" maxlength="2200" class="w-full min-w-48 rounded border border-gray-300 px-2 py-1 text-xs">${escapeHtml(post.caption)}</textarea>
+        ` : `<div class="text-xs text-gray-700 max-w-xs truncate">${escapeHtml(post.caption)}</div>`}
+      </td>
+      <td>
+        <span class="schedule-status-badge text-xs font-semibold px-2 py-1 rounded-full ${scheduleStatusColor(post)}">${escapeHtml(post.status)}</span>
+      </td>
+      <td class="schedule-actions-cell">
+        ${isQuickEditing ? `
+          <button type="button" class="btn-save-quick-edit px-2 py-1 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded" data-id="${escapeHtml(post.id)}">Salvar</button>
+          <button type="button" class="btn-cancel-quick-edit px-2 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded" data-id="${escapeHtml(post.id)}">Cancelar</button>
+        ` : `
+          <div class="schedule-row-actions" role="group" aria-label="Ações da publicação">
+            <button type="button" class="schedule-row-action schedule-row-action-view btn-view-post" data-id="${escapeHtml(post.id)}">Ver</button>
+            ${canEditPost(post) ? `<button type="button" class="schedule-row-action schedule-row-action-edit btn-quick-edit" data-id="${escapeHtml(post.id)}" title="Editar rápido" aria-label="Editar publicação"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>` : ''}
+            <button type="button" class="schedule-row-action schedule-row-action-delete btn-delete-post" data-id="${escapeHtml(post.id)}" title="Excluir publicação" aria-label="Excluir publicação"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>
+          </div>
+        `}
+      </td>
+    `;
+    return tr;
+  }
+
+  function appendScheduleRows(posts) {
+    const visiblePosts = posts.filter(postMatchesCurrentFilters);
+    if (visiblePosts.length === 0) return;
+    scheduleTableBody.querySelector('[data-schedule-empty]')?.remove();
+    const rows = document.createDocumentFragment();
+    visiblePosts.forEach(post => rows.appendChild(createScheduleTableRow(post, true)));
+    scheduleTableBody.prepend(rows);
+  }
+
   function renderListView() {
-    scheduleTableBody.innerHTML = '';
+    scheduleTableBody.replaceChildren();
     const filtered = getFilteredPosts();
 
     if (filtered.length === 0) {
       scheduleTableBody.innerHTML = `
-        <tr>
+        <tr data-schedule-empty>
           <td colspan="7" class="text-center py-8 text-gray-400">Nenhuma publicação corresponde aos filtros selecionados.</td>
         </tr>
       `;
       return;
     }
 
-    filtered.forEach(post => {
-      let typeClass = 'type-pill-reel';
-      if (post.type === 'test_reel') typeClass = 'type-pill-test';
-      else if (post.type === 'post') typeClass = 'type-pill-post';
-      else if (post.type === 'story') typeClass = 'type-pill-story';
-
-      const d = new Date(`${post.date}T${post.time}`);
-      const formattedDate = d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' });
-      const isQuickEditing = quickEditPostId === post.id;
-      const localDateTime = postLocalDateTime(post);
-
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>
-          <div class="table-thumb">
-            ${post.isVideo ? `<video src="${post.media}" muted></video>` : `<img src="${post.media}" alt="Capa">`}
-          </div>
-        </td>
-        <td>
-          <span class="schedule-card-type-pill ${typeClass} text-xs px-2 py-1">${post.typeLabel}</span>
-        </td>
-        <td>
-          ${isQuickEditing ? `
-            <label class="sr-only" for="quickEditDate-${escapeHtml(post.id)}">Data</label>
-            <input id="quickEditDate-${escapeHtml(post.id)}" type="date" class="mb-1 w-full rounded border border-gray-300 px-2 py-1 text-xs" value="${escapeHtml(localDateTime.date)}">
-            <label class="sr-only" for="quickEditTime-${escapeHtml(post.id)}">Horário</label>
-            <input id="quickEditTime-${escapeHtml(post.id)}" type="time" class="w-full rounded border border-gray-300 px-2 py-1 text-xs" value="${escapeHtml(localDateTime.time)}">
-          ` : `
-            <div class="font-semibold text-gray-900">${escapeHtml(post.time)}</div>
-            <div class="text-xs text-gray-500">${escapeHtml(formattedDate)}</div>
-          `}
-        </td>
-        <td>
-          <div class="flex items-center gap-1.5">
-            <i class="fa-brands fa-instagram text-pink-600 text-sm"></i>
-            <span class="text-xs font-semibold text-gray-800">alesantorooficial</span>
-          </div>
-        </td>
-        <td>
-          ${isQuickEditing ? `
-            <label class="sr-only" for="quickEditCaption-${escapeHtml(post.id)}">Legenda e hashtags</label>
-            <textarea id="quickEditCaption-${escapeHtml(post.id)}" rows="3" maxlength="2200" class="w-full min-w-48 rounded border border-gray-300 px-2 py-1 text-xs">${escapeHtml(post.caption)}</textarea>
-          ` : `<div class="text-xs text-gray-700 max-w-xs truncate">${escapeHtml(post.caption)}</div>`}
-        </td>
-        <td>
-          <span class="schedule-status-badge text-xs font-semibold px-2 py-1 rounded-full ${scheduleStatusColor(post)}">${escapeHtml(post.status)}</span>
-        </td>
-        <td class="schedule-actions-cell">
-          ${isQuickEditing ? `
-            <button type="button" class="btn-save-quick-edit px-2 py-1 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded" data-id="${escapeHtml(post.id)}">Salvar</button>
-            <button type="button" class="btn-cancel-quick-edit px-2 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded" data-id="${escapeHtml(post.id)}">Cancelar</button>
-          ` : `
-            <div class="schedule-row-actions" role="group" aria-label="Ações da publicação">
-              <button type="button" class="schedule-row-action schedule-row-action-view btn-view-post" data-id="${escapeHtml(post.id)}">Ver</button>
-              ${canEditPost(post) ? `<button type="button" class="schedule-row-action schedule-row-action-edit btn-quick-edit" data-id="${escapeHtml(post.id)}" title="Editar rápido" aria-label="Editar publicação"><i class="fa-solid fa-pen" aria-hidden="true"></i></button>` : ''}
-              <button type="button" class="schedule-row-action schedule-row-action-delete btn-delete-post" data-id="${escapeHtml(post.id)}" title="Excluir publicação" aria-label="Excluir publicação"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>
-            </div>
-          `}
-        </td>
-      `;
-      scheduleTableBody.appendChild(tr);
-    });
-
-    // Event listeners
-    document.querySelectorAll('.btn-view-post').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const post = scheduledPosts.find(p => p.id === btn.dataset.id);
-        if (post) openPostDetail(post);
-      });
-    });
-
-    document.querySelectorAll('.btn-quick-edit').forEach(btn => {
-      btn.addEventListener('click', () => {
-        quickEditPostId = btn.dataset.id;
-        renderListView();
-      });
-    });
-
-    document.querySelectorAll('.btn-cancel-quick-edit').forEach(btn => {
-      btn.addEventListener('click', () => {
-        quickEditPostId = null;
-        renderListView();
-      });
-    });
-
-    document.querySelectorAll('.btn-save-quick-edit').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const id = btn.dataset.id;
-        const date = document.getElementById(`quickEditDate-${id}`).value;
-        const time = document.getElementById(`quickEditTime-${id}`).value;
-        const caption = document.getElementById(`quickEditCaption-${id}`).value;
-        await saveScheduleEdit(id, date, time, caption);
-      });
-    });
-
-    document.querySelectorAll('.btn-delete-post').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        if (confirm('Deseja excluir este agendamento?')) {
-          if (btn.dataset.id.startsWith('story-')) {
-            try {
-              await fetch(`/api/schedules/${encodeURIComponent(btn.dataset.id)}`, { method: 'DELETE' });
-            } catch (error) {
-              showToast('Não foi possível sincronizar a exclusão com o backend.', 'warning');
-            }
-          }
-          scheduledPosts = scheduledPosts.filter(p => p.id !== btn.dataset.id);
-          updateScheduleBadge();
-          renderListView();
-          renderCalendar();
-          showToast('Agendamento excluído.', 'info');
-        }
-      });
-    });
+    filtered.forEach(post => scheduleTableBody.appendChild(createScheduleTableRow(post)));
   }
+
+  scheduleTableBody.addEventListener('click', async event => {
+    const button = event.target.closest('button[data-id]');
+    if (!button || !scheduleTableBody.contains(button)) return;
+    const id = button.dataset.id;
+
+    if (button.classList.contains('btn-view-post')) {
+      const post = scheduledPosts.find(item => item.id === id);
+      if (post) openPostDetail(post);
+    } else if (button.classList.contains('btn-quick-edit')) {
+      quickEditPostId = id;
+      renderListView();
+    } else if (button.classList.contains('btn-cancel-quick-edit')) {
+      quickEditPostId = null;
+      renderListView();
+    } else if (button.classList.contains('btn-save-quick-edit')) {
+      const date = document.getElementById(`quickEditDate-${id}`).value;
+      const time = document.getElementById(`quickEditTime-${id}`).value;
+      const caption = document.getElementById(`quickEditCaption-${id}`).value;
+      await saveScheduleEdit(id, date, time, caption);
+    } else if (button.classList.contains('btn-delete-post') && confirm('Deseja excluir este agendamento?')) {
+      if (id.startsWith('story-')) {
+        try {
+          await fetch(`/api/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        } catch (error) {
+          showToast('Não foi possível sincronizar a exclusão com o backend.', 'warning');
+        }
+      }
+      scheduledPosts = scheduledPosts.filter(post => post.id !== id);
+      updateScheduleBadge();
+      renderListView();
+      renderCalendar();
+      showToast('Agendamento excluído.', 'info');
+    }
+  });
 
   // --- Post Detail Modal ---
   const postDetailModal = document.getElementById('postDetailModal');
@@ -1522,6 +1572,12 @@ document.addEventListener('DOMContentLoaded', () => {
   renderCalendar();
   renderListView();
   loadSchedules();
+  window.setInterval(() => {
+    if (document.visibilityState === 'visible') loadSchedules();
+  }, 30000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') loadSchedules();
+  });
 
   // --- Toast Notification Helper ---
   function showToast(message, type = 'info') {

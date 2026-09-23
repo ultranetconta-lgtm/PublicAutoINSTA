@@ -2118,6 +2118,23 @@ input:checked + .switch-slider:before {
   white-space: nowrap;
 }
 
+.schedule-row-live-insert,
+.schedule-card-live-insert {
+  animation: schedule-live-insert 260ms ease-out both;
+}
+
+@keyframes schedule-live-insert {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .schedule-row-live-insert,
+  .schedule-card-live-insert {
+    animation: none;
+  }
+}
+
 .schedule-actions-cell {
   text-align: right;
   white-space: nowrap;
