@@ -6,6 +6,11 @@ kill_timeout = "5s"
 [build]
   dockerfile = "Dockerfile"
 
+[env]
+  GRAPH_API_BASE_URL = "https://graph.instagram.com"
+  GRAPH_API_VERSION = "v25.0"
+  PUBLIC_BASE_URL = "https://publicautoinsta-api.fly.dev"
+
 [http_service]
   internal_port = 8080
   force_https = true
