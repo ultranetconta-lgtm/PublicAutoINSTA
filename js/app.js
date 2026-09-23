@@ -934,7 +934,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderCalendar() {
     calendarCurrentMonthLabel.innerText = `${monthNames[calCurrentMonth]} ${calCurrentYear}`;
     calendarMonthGrid.innerHTML = '';
-    const visiblePosts = getFilteredPosts();
+    const visiblePosts = getFilteredPosts().slice().sort((a, b) => scheduleTimestamp(b) - scheduleTimestamp(a));
 
     const firstDayIndex = new Date(calCurrentYear, calCurrentMonth, 1).getDay();
     const daysInMonth = new Date(calCurrentYear, calCurrentMonth + 1, 0).getDate();
@@ -1001,7 +1001,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!cell) return;
 
     const cards = cell.querySelector('.cell-posts-list');
-    cards.insertAdjacentHTML('beforeend', calendarPostCardMarkup(post, true));
+    const template = document.createElement('template');
+    template.innerHTML = calendarPostCardMarkup(post, true).trim();
+    const newCard = template.content.firstElementChild;
+    const insertBefore = [...cards.querySelectorAll('.schedule-card')].find(card => {
+      const existingPost = scheduledPosts.find(item => item.id === card.dataset.id);
+      return existingPost && scheduleTimestamp(post) > scheduleTimestamp(existingPost);
+    });
+    cards.insertBefore(newCard, insertBefore || null);
     const count = cards.querySelectorAll('.schedule-card').length;
     let countBadge = cell.querySelector('.calendar-day-count');
     if (!countBadge) {
@@ -1052,6 +1059,45 @@ document.addEventListener('DOMContentLoaded', () => {
       return { date, time };
     }
     return { date: post.date, time: post.time };
+  }
+
+  function scheduleDateKey(post) {
+    return postLocalDateTime(post).date || '—';
+  }
+
+  function scheduleTimestamp(post) {
+    const localDateTime = postLocalDateTime(post);
+    const timestamp = new Date(`${localDateTime.date}T${localDateTime.time}`).getTime();
+    return Number.isNaN(timestamp) ? 0 : timestamp;
+  }
+
+  function formatScheduleGroupDate(dateKey) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return 'Data não definida';
+    return new Date(`${dateKey}T12:00:00`).toLocaleDateString('pt-BR', {
+      weekday: 'long', day: '2-digit', month: 'long', year: 'numeric'
+    });
+  }
+
+  function createScheduleDateDivider(dateKey, count) {
+    const divider = document.createElement('tr');
+    divider.className = 'schedule-date-divider-row';
+    divider.dataset.scheduleDateKey = dateKey;
+    divider.dataset.scheduleDateCount = String(count);
+    divider.innerHTML = `
+      <td colspan="7">
+        <div class="schedule-date-divider-content">
+          <span>${escapeHtml(formatScheduleGroupDate(dateKey))}</span>
+          <span class="schedule-date-divider-count">${count} ${count === 1 ? 'publicação' : 'publicações'}</span>
+        </div>
+      </td>
+    `;
+    return divider;
+  }
+
+  function updateScheduleDateDividerCount(divider, increment = 1) {
+    const count = Number(divider.dataset.scheduleDateCount || 0) + increment;
+    divider.dataset.scheduleDateCount = String(count);
+    divider.querySelector('.schedule-date-divider-count').innerText = `${count} ${count === 1 ? 'publicação' : 'publicações'}`;
   }
 
   function canEditPost(post) {
@@ -1132,6 +1178,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const isQuickEditing = quickEditPostId === post.id;
     const localDateTime = postLocalDateTime(post);
     const tr = document.createElement('tr');
+    tr.dataset.scheduleId = post.id;
     if (isNew) tr.classList.add('schedule-row-live-insert');
     tr.innerHTML = `
       <td>
@@ -1185,12 +1232,43 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function appendScheduleRows(posts) {
-    const visiblePosts = posts.filter(postMatchesCurrentFilters);
+    const visiblePosts = posts
+      .filter(postMatchesCurrentFilters)
+      .sort((a, b) => scheduleTimestamp(b) - scheduleTimestamp(a));
     if (visiblePosts.length === 0) return;
     scheduleTableBody.querySelector('[data-schedule-empty]')?.remove();
-    const rows = document.createDocumentFragment();
-    visiblePosts.forEach(post => rows.appendChild(createScheduleTableRow(post, true)));
-    scheduleTableBody.prepend(rows);
+
+    visiblePosts.forEach(post => {
+      const dateKey = scheduleDateKey(post);
+      const dateDividers = [...scheduleTableBody.querySelectorAll('.schedule-date-divider-row')];
+      let divider = dateDividers.find(item => item.dataset.scheduleDateKey === dateKey);
+      const row = createScheduleTableRow(post, true);
+
+      if (!divider) {
+        divider = createScheduleDateDivider(dateKey, 1);
+        const firstOlderDivider = dateDividers.find(item => item.dataset.scheduleDateKey < dateKey);
+        if (firstOlderDivider) {
+          scheduleTableBody.insertBefore(divider, firstOlderDivider);
+          scheduleTableBody.insertBefore(row, firstOlderDivider);
+        } else {
+          scheduleTableBody.append(divider, row);
+        }
+        return;
+      }
+
+      let sibling = divider.nextElementSibling;
+      let insertBefore = null;
+      while (sibling && !sibling.classList.contains('schedule-date-divider-row')) {
+        const existingPost = scheduledPosts.find(item => item.id === sibling.dataset.scheduleId);
+        if (existingPost && scheduleTimestamp(post) > scheduleTimestamp(existingPost)) {
+          insertBefore = sibling;
+          break;
+        }
+        sibling = sibling.nextElementSibling;
+      }
+      scheduleTableBody.insertBefore(row, insertBefore || sibling);
+      updateScheduleDateDividerCount(divider);
+    });
   }
 
   function renderListView() {
@@ -1206,7 +1284,18 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    filtered.forEach(post => scheduleTableBody.appendChild(createScheduleTableRow(post)));
+    const orderedPosts = filtered.slice().sort((a, b) => scheduleTimestamp(b) - scheduleTimestamp(a));
+    const postsByDate = new Map();
+    orderedPosts.forEach(post => {
+      const dateKey = scheduleDateKey(post);
+      if (!postsByDate.has(dateKey)) postsByDate.set(dateKey, []);
+      postsByDate.get(dateKey).push(post);
+    });
+
+    postsByDate.forEach((posts, dateKey) => {
+      scheduleTableBody.appendChild(createScheduleDateDivider(dateKey, posts.length));
+      posts.forEach(post => scheduleTableBody.appendChild(createScheduleTableRow(post)));
+    });
   }
 
   scheduleTableBody.addEventListener('click', async event => {
