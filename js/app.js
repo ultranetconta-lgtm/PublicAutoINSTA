@@ -1234,7 +1234,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function appendScheduleRows(posts) {
     const visiblePosts = posts
       .filter(postMatchesCurrentFilters)
-      .sort((a, b) => scheduleTimestamp(b) - scheduleTimestamp(a));
+      .sort((a, b) => scheduleTimestamp(a) - scheduleTimestamp(b));
     if (visiblePosts.length === 0) return;
     scheduleTableBody.querySelector('[data-schedule-empty]')?.remove();
 
@@ -1246,10 +1246,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (!divider) {
         divider = createScheduleDateDivider(dateKey, 1);
-        const firstOlderDivider = dateDividers.find(item => item.dataset.scheduleDateKey < dateKey);
-        if (firstOlderDivider) {
-          scheduleTableBody.insertBefore(divider, firstOlderDivider);
-          scheduleTableBody.insertBefore(row, firstOlderDivider);
+        const firstLaterDivider = dateDividers.find(item => item.dataset.scheduleDateKey > dateKey);
+        if (firstLaterDivider) {
+          scheduleTableBody.insertBefore(divider, firstLaterDivider);
+          scheduleTableBody.insertBefore(row, firstLaterDivider);
         } else {
           scheduleTableBody.append(divider, row);
         }
@@ -1260,7 +1260,7 @@ document.addEventListener('DOMContentLoaded', () => {
       let insertBefore = null;
       while (sibling && !sibling.classList.contains('schedule-date-divider-row')) {
         const existingPost = scheduledPosts.find(item => item.id === sibling.dataset.scheduleId);
-        if (existingPost && scheduleTimestamp(post) > scheduleTimestamp(existingPost)) {
+        if (existingPost && scheduleTimestamp(post) < scheduleTimestamp(existingPost)) {
           insertBefore = sibling;
           break;
         }
@@ -1284,7 +1284,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    const orderedPosts = filtered.slice().sort((a, b) => scheduleTimestamp(b) - scheduleTimestamp(a));
+    const orderedPosts = filtered.slice().sort((a, b) => scheduleTimestamp(a) - scheduleTimestamp(b));
     const postsByDate = new Map();
     orderedPosts.forEach(post => {
       const dateKey = scheduleDateKey(post);
