@@ -6,10 +6,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const previewCaption = document.getElementById('previewCaption');
   const fileInput = document.getElementById('mediaFileInput');
   const btnAddMedia = document.getElementById('btnAddMedia');
+  const networkAddButton = document.querySelector('.network-add-btn');
   const editorMediaPreviewArea = document.getElementById('editorMediaPreviewArea');
   const thumbVideo = document.getElementById('thumbVideo');
   const thumbImage = document.getElementById('thumbImage');
   const btnThumbOptions = document.getElementById('btnThumbOptions');
+  const composerMessageBox = document.getElementById('composerMessageBox');
+  const composerMessageBoxPanel = document.getElementById('composerMessageBoxPanel');
+  const composerMessageBoxTitle = document.getElementById('composerMessageBoxTitle');
+  const composerMessageBoxDescription = document.getElementById('composerMessageBoxDescription');
+  const composerMessageBoxActions = document.getElementById('composerMessageBoxActions');
 
   const previewMediaLayer = document.getElementById('previewMediaLayer');
   const mediaEmptyPlaceholder = document.getElementById('mediaEmptyPlaceholder');
@@ -189,6 +195,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    if (currentMedia?.url) URL.revokeObjectURL(currentMedia.url);
     const fileUrl = URL.createObjectURL(file);
     currentMedia = {
       file,
@@ -232,20 +239,155 @@ document.addEventListener('DOMContentLoaded', () => {
     showToast(isVideo ? 'Vídeo carregado com sucesso!' : 'Imagem carregada com sucesso!', 'success');
   }
 
-  btnAddMedia.addEventListener('click', () => {
+  function clearAttachedMedia() {
+    if (currentMedia?.url) URL.revokeObjectURL(currentMedia.url);
+    currentMedia = null;
+    fileInput.value = '';
+    editorMediaPreviewArea.style.display = 'none';
+
+    thumbVideo.pause();
+    thumbVideo.removeAttribute('src');
+    thumbVideo.load();
+    thumbVideo.classList.add('hidden');
+    thumbImage.removeAttribute('src');
+    thumbImage.classList.add('hidden');
+
+    previewVideo.pause();
+    previewVideo.removeAttribute('src');
+    previewVideo.load();
+    previewVideo.style.display = 'none';
+    previewVideo.classList.add('hidden');
+    previewImage.removeAttribute('src');
+    previewImage.style.display = 'none';
+    previewImage.classList.add('hidden');
+    mediaEmptyPlaceholder.classList.remove('hidden');
+    videoControlsOverlay.classList.add('hidden');
+    reelPlayIcon.className = 'fa-solid fa-play ml-1';
+  }
+
+  let composerMessageBoxReturnFocus = null;
+
+  function closeComposerMessageBox() {
+    composerMessageBox.hidden = true;
+    composerMessageBoxActions.replaceChildren();
+    if (composerMessageBoxReturnFocus?.isConnected && composerMessageBoxReturnFocus.getClientRects().length > 0) {
+      composerMessageBoxReturnFocus.focus({ preventScroll: true });
+    } else if (composerMessageBoxReturnFocus?.isConnected && composerMessageBoxReturnFocus !== btnAddMedia) {
+      btnAddMedia.focus({ preventScroll: true });
+    }
+    composerMessageBoxReturnFocus = null;
+  }
+
+  function showComposerMessageBox({ title, message, actions }) {
+    composerMessageBoxTitle.innerText = title;
+    composerMessageBoxDescription.innerText = message;
+    composerMessageBoxReturnFocus = document.activeElement;
+    composerMessageBoxActions.replaceChildren();
+
+    actions.forEach(action => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `composer-messagebox-button${action.style ? ` is-${action.style}` : ''}`;
+      button.innerText = action.label;
+      button.addEventListener('click', () => {
+        closeComposerMessageBox();
+        action.onClick?.();
+      });
+      composerMessageBoxActions.appendChild(button);
+    });
+
+    composerMessageBox.hidden = false;
+    const firstAction = composerMessageBoxActions.querySelector('button');
+    (firstAction || composerMessageBoxPanel).focus({ preventScroll: true });
+  }
+
+  function openMediaPicker() {
+    fileInput.value = '';
     fileInput.click();
+  }
+
+  function resetComposer() {
+    clearAttachedMedia();
+    editor.innerText = '';
+    updateEditorState();
+    document.getElementById('firstCommentInput').value = '';
+    btnFirstComment.classList.remove('active-tool');
+    document.getElementById('notesInput').value = '';
+    firstCommentModal.classList.remove('active');
+    notesModal.classList.remove('active');
+    datePickerModal.classList.remove('active');
+    networkDropdownMenu.classList.remove('show');
+    hashtagsAutocompleteCard.classList.remove('show');
+    emojiPopover.classList.remove('show');
+    selectedPublishAction = 'schedule';
+    btnSchedule.innerText = 'Agendamento';
+    scheduleMenu.classList.remove('show');
+    document.getElementById('scheduledDateInput').value = '';
+    document.getElementById('scheduledTimeInput').value = '';
+    ensureFutureScheduleDefault();
+    showToast('Publicação limpa. Você pode começar uma nova.', 'success');
+  }
+
+  function handleNewPublicationClick() {
+    const hasDraftContent = Boolean(
+      currentMedia
+      || editor.innerText.trim()
+      || document.getElementById('firstCommentInput').value.trim()
+      || document.getElementById('notesInput').value.trim()
+      || selectedPublishAction !== 'schedule'
+    );
+
+    if (!hasDraftContent) {
+      resetComposer();
+      return;
+    }
+
+    showComposerMessageBox({
+      title: 'Começar uma nova publicação?',
+      message: 'O texto, o anexo e as opções desta publicação serão limpos para você começar do zero.',
+      actions: [
+        { label: 'Continuar editando' },
+        { label: 'Limpar e começar', style: 'danger', onClick: resetComposer }
+      ]
+    });
+  }
+
+  networkAddButton.addEventListener('click', handleNewPublicationClick);
+
+  btnAddMedia.addEventListener('click', () => {
+    openMediaPicker();
   });
 
   fileInput.addEventListener('change', (e) => {
     if (e.target.files && e.target.files[0]) {
       handleMediaFile(e.target.files[0]);
     }
+    e.target.value = '';
   });
 
   btnThumbOptions.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (confirm('Deseja substituir ou remover a mídia anexada? Clique em OK para trocar de arquivo.')) {
-      fileInput.click();
+    showComposerMessageBox({
+      title: 'Mídia anexada',
+      message: 'O que você deseja fazer com a mídia desta publicação?',
+      actions: [
+        { label: 'Cancelar' },
+        { label: 'Remover anexo', style: 'danger', onClick: () => {
+          clearAttachedMedia();
+          showToast('Anexo removido da publicação.', 'info');
+        } },
+        { label: 'Trocar arquivo', style: 'primary', onClick: openMediaPicker }
+      ]
+    });
+  });
+
+  composerMessageBox.addEventListener('click', event => {
+    if (event.target === composerMessageBox) closeComposerMessageBox();
+  });
+
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !composerMessageBox.hidden) {
+      closeComposerMessageBox();
     }
   });
 

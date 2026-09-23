@@ -18,7 +18,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   
   <!-- Application Styles -->
-  <link rel="stylesheet" href="css/styles.css?v=actions-capsule-20260923">
+  <link rel="stylesheet" href="css/styles.css?v=publication-messagebox-20260923">
   <link rel="stylesheet" href="css/analises.css?v=average-line-20260923">
 </head>
 <body>
@@ -95,8 +95,8 @@
               </button>
             </div>
 
-            <!-- Add More Networks Button -->
-            <button type="button" class="network-add-btn" title="Adicionar mais redes">
+            <!-- Start a new publication -->
+            <button type="button" class="network-add-btn" title="Nova publicação" aria-label="Nova publicação">
               <i class="mdi mdi-plus text-lg"></i>
             </button>
           </div>
@@ -1027,6 +1027,16 @@
     </div>
   </div>
 
+  <!-- In-app confirmation for starting a new publication or changing its media -->
+  <div class="composer-messagebox-overlay" id="composerMessageBox" hidden>
+    <section class="composer-messagebox" id="composerMessageBoxPanel" role="alertdialog" aria-modal="true" aria-labelledby="composerMessageBoxTitle" aria-describedby="composerMessageBoxDescription" tabindex="-1">
+      <div class="composer-messagebox-icon" aria-hidden="true"><i class="fa-solid fa-circle-question"></i></div>
+      <h2 id="composerMessageBoxTitle"></h2>
+      <p id="composerMessageBoxDescription"></p>
+      <div class="composer-messagebox-actions" id="composerMessageBoxActions"></div>
+    </section>
+  </div>
+
   <!-- Modal Dialog Helper Styles -->
   <style>
     .fixed.active {
@@ -1039,6 +1049,6 @@
 
   <!-- Application Logic -->
   <script src="js/analises.js?v=meta-insights-20260923"></script>
-  <script src="js/app.js?v=scheduled-count-20260923"></script>
+  <script src="js/app.js?v=publication-messagebox-20260923"></script>
 </body>
 </html>
