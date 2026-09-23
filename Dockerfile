@@ -17,4 +17,4 @@ RUN rm -rf /app/backend/data /app/backend/uploads \
     && ln -s /data/uploads /app/backend/uploads
 
 EXPOSE 8080
-CMD ["python3", "backend/server.py", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["sh", "-c", "mkdir -p /data/uploads && exec python3 backend/server.py --host 0.0.0.0 --port 8080"]
