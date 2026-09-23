@@ -1,0 +1,10 @@
+.git/
+.DS_Store
+api/.env*
+backend/data/*.json
+backend/uploads/*
+backend/test_*.py
+docs/
+midiaPost/
+__pycache__/
+*.py[cod]
