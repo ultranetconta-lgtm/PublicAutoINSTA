@@ -1305,6 +1305,170 @@ input:checked + .switch-slider:before {
   animation: slideInRight 0.3s ease;
 }
 
+/* Upload progress dialog */
+.upload-progress-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.46);
+  backdrop-filter: blur(3px);
+}
+
+.upload-progress-overlay[hidden] {
+  display: none;
+}
+
+.upload-progress-card {
+  width: min(100%, 390px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: 28px 26px 24px;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+  text-align: center;
+  outline: none;
+}
+
+.upload-progress-ring-wrap {
+  position: relative;
+  width: 144px;
+  height: 144px;
+  flex: 0 0 auto;
+}
+
+.upload-progress-ring {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.upload-progress-ring-track,
+.upload-progress-ring-value {
+  fill: none;
+  stroke-width: 9;
+}
+
+.upload-progress-ring-track {
+  stroke: #e2e8f0;
+}
+
+.upload-progress-ring-value {
+  stroke: #0284c7;
+  stroke-linecap: round;
+  stroke-dasharray: 376.99;
+  stroke-dashoffset: 376.99;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  transition: stroke-dashoffset 180ms linear, stroke 180ms ease;
+}
+
+.upload-progress-ring-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.upload-progress-ring-center strong {
+  color: #0f172a;
+  font-size: 30px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.upload-progress-ring-center span {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.upload-progress-details {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.upload-progress-details h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.upload-progress-details p {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.upload-progress-file {
+  overflow-wrap: anywhere;
+  padding-top: 3px;
+  color: #334155 !important;
+  font-weight: 600;
+}
+
+.upload-progress-metadata {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid #f1f5f9;
+  color: #64748b;
+  font-size: 12px;
+  text-align: left;
+}
+
+.upload-progress-metadata strong {
+  color: #334155;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.upload-progress-card.is-processing .upload-progress-ring-value {
+  stroke: #7c3aed;
+  stroke-dasharray: 96 281.99;
+  animation: upload-progress-orbit 1.25s linear infinite;
+}
+
+.upload-progress-card.is-complete .upload-progress-ring-value {
+  stroke: #16a34a;
+}
+
+@media (max-width: 480px) {
+  .upload-progress-card {
+    padding: 24px 18px 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .upload-progress-ring-value {
+    transition: none;
+  }
+
+  .upload-progress-card.is-processing .upload-progress-ring-value {
+    animation: none;
+  }
+}
+
+@keyframes upload-progress-orbit {
+  from { transform: rotate(-90deg); }
+  to { transform: rotate(270deg); }
+}
+
 @keyframes slideInRight {
   from { transform: translateX(100%); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }

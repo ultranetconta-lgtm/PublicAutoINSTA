@@ -998,6 +998,35 @@
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toastContainer"></div>
 
+  <!-- Upload and server-processing progress -->
+  <div class="upload-progress-overlay" id="uploadProgressOverlay" role="dialog" aria-modal="true" aria-labelledby="uploadProgressTitle" aria-describedby="uploadProgressStatus" hidden>
+    <div class="upload-progress-card" id="uploadProgressCard" tabindex="-1">
+      <div class="upload-progress-ring-wrap" role="progressbar" aria-label="Progresso de transferência" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <svg class="upload-progress-ring" viewBox="0 0 140 140" aria-hidden="true">
+          <circle class="upload-progress-ring-track" cx="70" cy="70" r="60"></circle>
+          <circle class="upload-progress-ring-value" id="uploadProgressRingValue" cx="70" cy="70" r="60"></circle>
+        </svg>
+        <div class="upload-progress-ring-center">
+          <strong id="uploadProgressPercent">0%</strong>
+          <span id="uploadProgressPhase">ENVIO</span>
+        </div>
+      </div>
+      <div class="upload-progress-details">
+        <h2 id="uploadProgressTitle">Enviando arquivo</h2>
+        <p id="uploadProgressStatus" role="status" aria-live="polite">Preparando o envio…</p>
+        <p class="upload-progress-file" id="uploadProgressFileName"></p>
+        <div class="upload-progress-metadata">
+          <span>Tamanho do arquivo</span>
+          <strong id="uploadProgressFileSize">—</strong>
+        </div>
+        <div class="upload-progress-metadata">
+          <span>Dados enviados</span>
+          <strong id="uploadProgressTransferred">0 B</strong>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal Dialog Helper Styles -->
   <style>
     .fixed.active {

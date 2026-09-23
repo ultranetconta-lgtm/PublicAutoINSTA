@@ -49,6 +49,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const scheduleMenu = document.getElementById('scheduleMenu');
   const btnDateTime = document.getElementById('btnDateTime');
   const datePickerModal = document.getElementById('datePickerModal');
+  const uploadProgressOverlay = document.getElementById('uploadProgressOverlay');
+  const uploadProgressCard = document.getElementById('uploadProgressCard');
+  const uploadProgressRingValue = document.getElementById('uploadProgressRingValue');
+  const uploadProgressPercent = document.getElementById('uploadProgressPercent');
+  const uploadProgressPhase = document.getElementById('uploadProgressPhase');
+  const uploadProgressTitle = document.getElementById('uploadProgressTitle');
+  const uploadProgressStatus = document.getElementById('uploadProgressStatus');
+  const uploadProgressFileName = document.getElementById('uploadProgressFileName');
+  const uploadProgressFileSize = document.getElementById('uploadProgressFileSize');
+  const uploadProgressTransferred = document.getElementById('uploadProgressTransferred');
 
   // Emoji, First Comment, Notes
   const btnEmoji = document.getElementById('btnEmoji');
@@ -1126,16 +1136,135 @@ document.addEventListener('DOMContentLoaded', () => {
   btnClosePostDetail.addEventListener('click', () => postDetailModal.classList.remove('active'));
 
   // --- Schedule Button Action ---
+  function formatUploadBytes(bytes) {
+    if (!Number.isFinite(bytes) || bytes < 0) return '0 B';
+    if (bytes < 1024) return `${Math.round(bytes)} B`;
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    let value = bytes / 1024;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit += 1;
+    }
+    return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`;
+  }
+
+  function setUploadProgress(percent) {
+    const determinate = Number.isFinite(percent);
+    const boundedPercent = determinate ? Math.max(0, Math.min(100, Math.round(percent))) : null;
+    uploadProgressCard.classList.toggle('is-indeterminate', !determinate);
+    uploadProgressPercent.innerText = determinate ? `${boundedPercent}%` : '…';
+    uploadProgressRingValue.style.strokeDashoffset = determinate
+      ? `${376.99 * (1 - boundedPercent / 100)}`
+      : '300';
+    const progressRing = uploadProgressRingValue.closest('.upload-progress-ring-wrap');
+    if (determinate) {
+      progressRing.setAttribute('aria-valuenow', String(boundedPercent));
+    } else {
+      progressRing.removeAttribute('aria-valuenow');
+    }
+  }
+
+  function openUploadProgress(file, action, contentLabel) {
+    const actionLabel = action === 'publish_now' ? 'publicação' : 'agendamento';
+    uploadProgressCard.classList.remove('is-processing', 'is-complete', 'is-indeterminate');
+    uploadProgressTitle.innerText = `Enviando ${contentLabel}`;
+    uploadProgressStatus.innerText = `Enviando o arquivo para ${actionLabel}…`;
+    uploadProgressPhase.innerText = 'ENVIO';
+    uploadProgressFileName.innerText = file.name;
+    uploadProgressFileSize.innerText = formatUploadBytes(file.size);
+    uploadProgressTransferred.innerText = 'Aguardando dados';
+    setUploadProgress(0);
+    uploadProgressOverlay.hidden = false;
+    uploadProgressCard.focus({ preventScroll: true });
+  }
+
+  function updateUploadProgress(event) {
+    uploadProgressTransferred.innerText = event.lengthComputable
+      ? `${formatUploadBytes(event.loaded)} de ${formatUploadBytes(event.total)}`
+      : `${formatUploadBytes(event.loaded)} enviados`;
+    setUploadProgress(event.lengthComputable && event.total > 0
+      ? (event.loaded / event.total) * 100
+      : null);
+  }
+
+  function showUploadServerProcessing(action, contentLabel) {
+    uploadProgressCard.classList.remove('is-indeterminate');
+    uploadProgressCard.classList.add('is-processing');
+    uploadProgressTitle.innerText = action === 'publish_now'
+      ? `Publicando ${contentLabel}`
+      : `Concluindo ${contentLabel}`;
+    uploadProgressStatus.innerText = action === 'publish_now'
+      ? 'Arquivo enviado. Aguardando a confirmação da publicação…'
+      : 'Arquivo enviado. Finalizando o agendamento…';
+    uploadProgressPhase.innerText = 'PROCESSANDO';
+    setUploadProgress(100);
+  }
+
+  function completeUploadProgress(message) {
+    uploadProgressCard.classList.remove('is-processing', 'is-indeterminate');
+    uploadProgressCard.classList.add('is-complete');
+    uploadProgressTitle.innerText = message;
+    uploadProgressStatus.innerText = 'O servidor confirmou a conclusão.';
+    uploadProgressPhase.innerText = 'CONCLUÍDO';
+    uploadProgressTransferred.innerText = `${uploadProgressFileSize.innerText} enviados`;
+    setUploadProgress(100);
+  }
+
+  function closeUploadProgress() {
+    uploadProgressOverlay.hidden = true;
+    uploadProgressCard.classList.remove('is-processing', 'is-complete', 'is-indeterminate');
+    if (!btnSchedule.disabled) btnSchedule.focus({ preventScroll: true });
+  }
+
+  function uploadFormDataWithProgress(endpoint, formData, file, action, contentLabel) {
+    openUploadProgress(file, action, contentLabel);
+    return new Promise((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      request.open('POST', endpoint, true);
+      request.upload.addEventListener('progress', updateUploadProgress);
+      request.upload.addEventListener('load', (event) => {
+        if (event.lengthComputable) updateUploadProgress(event);
+        showUploadServerProcessing(action, contentLabel);
+      });
+      request.addEventListener('load', () => {
+        let payload = {};
+        try {
+          payload = JSON.parse(request.responseText || '{}');
+        } catch {
+          payload = {};
+        }
+        if (request.status < 200 || request.status >= 300) {
+          reject(new Error(payload.message || payload.error || `Não foi possível enviar ${contentLabel}.`));
+          return;
+        }
+        if (!payload.story) {
+          reject(new Error(`O servidor não confirmou o ${action === 'publish_now' ? 'envio' : 'agendamento'}.`));
+          return;
+        }
+        resolve(payload);
+      });
+      request.addEventListener('error', () => reject(new Error('Não foi possível conectar ao servidor.')));
+      request.addEventListener('abort', () => reject(new Error('O envio foi interrompido.')));
+      request.send(formData);
+    });
+  }
+
+  function waitForUploadCompletion() {
+    return new Promise(resolve => setTimeout(resolve, 800));
+  }
+
   async function submitStoryToBackend() {
     if (!currentMedia) {
       showToast('Selecione uma imagem JPG ou vídeo MP4 para o Story.', 'warning');
       return;
     }
 
+    const action = selectedPublishAction;
     const formData = new FormData();
-    formData.append('action', selectedPublishAction);
+    formData.append('action', action);
     formData.append('caption', editor.innerText.trim());
-    if (selectedPublishAction === 'schedule') {
+    if (action === 'schedule') {
       const date = document.getElementById('scheduledDateInput').value;
       const time = document.getElementById('scheduledTimeInput').value;
       formData.append('scheduled_at', new Date(`${date}T${time}`).toISOString());
@@ -1143,27 +1272,24 @@ document.addEventListener('DOMContentLoaded', () => {
     formData.append('media', currentMedia.file, currentMedia.file.name);
 
     btnSchedule.disabled = true;
+    btnScheduleDropdown.disabled = true;
     try {
-      const response = await fetch('/api/stories', { method: 'POST', body: formData });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload.message || payload.error || 'Não foi possível enviar o Story.');
-      }
+      const payload = await uploadFormDataWithProgress('/api/stories', formData, currentMedia.file, action, 'Story');
       const story = payload.story;
       scheduledPosts.unshift(normalizeBackendSchedule(story));
       updateScheduleBadge();
       renderCalendar();
       renderListView();
-      showToast(
-        selectedPublishAction === 'publish_now'
-          ? 'Story publicado com sucesso.'
-          : 'Story agendado com sucesso.',
-        'success'
-      );
+      const successMessage = action === 'publish_now' ? 'Story publicado com sucesso.' : 'Story agendado com sucesso.';
+      completeUploadProgress(successMessage);
+      showToast(successMessage, 'success');
+      await waitForUploadCompletion();
     } catch (error) {
       showToast(error.message || 'Não foi possível conectar ao backend.', 'warning');
     } finally {
       btnSchedule.disabled = false;
+      btnScheduleDropdown.disabled = false;
+      closeUploadProgress();
     }
   }
 
@@ -1173,11 +1299,12 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    const action = selectedPublishAction;
     const formData = new FormData();
-    formData.append('action', selectedPublishAction);
+    formData.append('action', action);
     formData.append('caption', editor.innerText.trim());
     formData.append('graduation_strategy', 'MANUAL');
-    if (selectedPublishAction === 'schedule') {
+    if (action === 'schedule') {
       const date = document.getElementById('scheduledDateInput').value;
       const time = document.getElementById('scheduledTimeInput').value;
       formData.append('scheduled_at', new Date(`${date}T${time}`).toISOString());
@@ -1185,26 +1312,25 @@ document.addEventListener('DOMContentLoaded', () => {
     formData.append('media', currentMedia.file, currentMedia.file.name);
 
     btnSchedule.disabled = true;
+    btnScheduleDropdown.disabled = true;
     try {
-      const response = await fetch('/api/reels', { method: 'POST', body: formData });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload.message || payload.error || 'Não foi possível enviar o Reel de teste.');
-      }
+      const payload = await uploadFormDataWithProgress('/api/reels', formData, currentMedia.file, action, 'Reel de teste');
       scheduledPosts.unshift(normalizeBackendSchedule(payload.story));
       updateScheduleBadge();
       renderCalendar();
       renderListView();
-      showToast(
-        selectedPublishAction === 'publish_now'
-          ? 'Reel de teste publicado com sucesso.'
-          : 'Reel de teste agendado com sucesso.',
-        'success'
-      );
+      const successMessage = action === 'publish_now'
+        ? 'Reel de teste publicado com sucesso.'
+        : 'Reel de teste agendado com sucesso.';
+      completeUploadProgress(successMessage);
+      showToast(successMessage, 'success');
+      await waitForUploadCompletion();
     } catch (error) {
       showToast(error.message || 'Não foi possível conectar ao backend.', 'warning');
     } finally {
       btnSchedule.disabled = false;
+      btnScheduleDropdown.disabled = false;
+      closeUploadProgress();
     }
   }
 
