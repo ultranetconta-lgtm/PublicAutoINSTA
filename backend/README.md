@@ -16,7 +16,7 @@ As credenciais ficam somente em `api/.env`. O servidor lê:
 
 Um túnel rápido `trycloudflare.com` tem URL temporária e não oferece garantia de disponibilidade. Se o túnel for encerrado, reinicie-o, atualize `PUBLIC_BASE_URL` e reinicie o backend antes de criar outros agendamentos. Para agendamentos contínuos, use uma origem HTTPS estável. A checagem de `/api/health` informa que a URL foi configurada; o teste real do arquivo público é feito ao agendar e novamente no horário da publicação.
 
-O backend exige `ffmpeg` no `PATH` ou em `~/.local/bin/ffmpeg` para Reels. Cada vídeo recebido é remuxado sem recodificar áudio/vídeo para um MP4 de início rápido, com `moov` antes de `mdat` e sem edit list. Isso corrige a estrutura do arquivo observado neste caso; não converte codecs ou resoluções incompatíveis. Uma falha na conversão impede o agendamento e apaga apenas a cópia temporária criada pelo backend.
+O backend exige `ffmpeg` no `PATH` ou em `~/.local/bin/ffmpeg` para converter PNGs e preparar Reels. PNGs são convertidos para JPEG antes da validação pública. Cada vídeo recebido é remuxado sem recodificar áudio/vídeo para um MP4 de início rápido, com `moov` antes de `mdat` e sem edit list. Isso corrige a estrutura do arquivo observado neste caso; não converte codecs ou resoluções incompatíveis. Uma falha na conversão impede o agendamento e apaga apenas a cópia temporária criada pelo backend.
 
 ## Executar
 

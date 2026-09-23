@@ -155,12 +155,17 @@ def verify_public_media(media_url: str, expected_size: int) -> None:
         raise ValueError("Mídia pública inacessível: verifique o túnel HTTPS e PUBLIC_BASE_URL.") from exc
 
 
-def normalize_reel_video(path: Path) -> None:
-    """Remux a Reel to a fast-start MP4 without edit lists before Meta fetches it."""
+def find_ffmpeg() -> str | None:
     ffmpeg = os.environ.get("FFMPEG_BIN") or shutil.which("ffmpeg")
     if not ffmpeg:
         local_ffmpeg = Path.home() / ".local" / "bin" / "ffmpeg"
         ffmpeg = str(local_ffmpeg) if local_ffmpeg.is_file() else None
+    return ffmpeg
+
+
+def normalize_reel_video(path: Path) -> None:
+    """Remux a Reel to a fast-start MP4 without edit lists before Meta fetches it."""
+    ffmpeg = find_ffmpeg()
     if not ffmpeg:
         raise ValueError("reel_conversion_unavailable")
 
@@ -330,6 +335,9 @@ class StoryApplication:
         filename = f"{uuid.uuid4().hex}{extension}"
         output_path = self.uploads_path / filename
         if (media.get("content_type") or "").lower().split(";", 1)[0] == "image/png":
+            ffmpeg = find_ffmpeg()
+            if not ffmpeg:
+                raise ValueError("png_conversion_unavailable")
             temporary_path = None
             try:
                 with tempfile.NamedTemporaryFile(
@@ -338,13 +346,21 @@ class StoryApplication:
                     temporary_file.write(media["content"])
                     temporary_path = Path(temporary_file.name)
                 subprocess.run(
-                    ["sips", "-s", "format", "jpeg", "-s", "formatOptions", "90", str(temporary_path), "--out", str(output_path)],
+                    [
+                        ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+                        "-i", str(temporary_path), "-map_metadata", "-1",
+                        "-frames:v", "1", "-q:v", "2", "-f", "image2", str(output_path),
+                    ],
                     check=True,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     timeout=20,
                 )
+                if not output_path.is_file() or output_path.stat().st_size == 0:
+                    output_path.unlink(missing_ok=True)
+                    raise ValueError("png_conversion_failed")
             except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+                output_path.unlink(missing_ok=True)
                 raise ValueError("png_conversion_failed") from exc
             finally:
                 if temporary_path:
@@ -917,6 +933,8 @@ class PlannerHandler(SimpleHTTPRequestHandler):
     def _friendly_error(code: str) -> str:
         messages = {
             "media_required": "Selecione uma imagem JPG ou vídeo MP4 para o Story.",
+            "png_conversion_unavailable": "O servidor não dispõe de FFmpeg para converter a imagem PNG.",
+            "png_conversion_failed": "Não foi possível converter a imagem PNG para JPEG.",
             "duplicate_reel": DUPLICATE_REEL_MESSAGE,
             "public_media_not_configured": "Configure PUBLIC_BASE_URL com uma URL HTTPS pública para o Meta acessar a mídia.",
             "meta_not_configured": "Configure o token e o Instagram User ID no backend.",
