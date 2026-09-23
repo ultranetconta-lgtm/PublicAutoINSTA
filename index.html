@@ -19,17 +19,13 @@
   
   <!-- Application Styles -->
   <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/analises.css?v=average-line-20260923">
 </head>
 <body>
 
   <!-- Fullscreen Planner App Container -->
   <div class="planner-app-container">
     
-    <!-- Top Progress Linear Indicator -->
-    <div class="v-progress-linear">
-      <div class="v-progress-linear__indeterminate"></div>
-    </div>
-
     <!-- Page Header -->
     <header class="page-header">
       <div class="page-header-title-row">
@@ -46,7 +42,7 @@
             </div>
           </div>
 
-          <!-- Top Navigation Tabs (Aba Agendamentos & Calendário) -->
+          <!-- Top Navigation Tabs (Aba Agendamentos, Calendário & Análises) -->
           <nav class="top-nav-tabs">
             <button type="button" class="top-nav-tab active" id="tabBtnPlanner" data-tab="planner">
               <i class="fa-solid fa-pen-to-square text-sm"></i>
@@ -56,6 +52,10 @@
               <i class="fa-solid fa-calendar-days text-sm"></i>
               <span>Agendamentos</span>
               <span class="tab-badge" id="agendamentosCountBadge">3</span>
+            </button>
+            <button type="button" class="top-nav-tab" id="tabBtnAnalises" data-tab="analises">
+              <i class="fa-solid fa-chart-line text-sm"></i>
+              <span>Análises</span>
             </button>
           </nav>
         </div>
@@ -76,7 +76,7 @@
       
       <!-- LEFT COLUMN: Editor and Configuration (58%) -->
       <section class="planner-left-column">
-        
+
         <!-- Networks Selector Bar -->
         <div class="networks-bar">
           <div class="network-badge-group">
@@ -175,9 +175,9 @@
             <div class="editor-textarea" id="postEditor" contenteditable="true" data-placeholder="" spellcheck="false"></div>
 
             <!-- In-Editor Media Thumbnail (Screenshot 3) -->
-            <div class="editor-media-preview-area" id="editorMediaPreviewArea">
+            <div class="editor-media-preview-area" id="editorMediaPreviewArea" style="display: none;">
               <div class="editor-media-thumb" id="editorMediaThumb">
-                <video src="assets/CLIP6.mp4" id="thumbVideo" muted playsinline></video>
+                <video id="thumbVideo" class="hidden" muted playsinline></video>
                 <img src="assets/avatar.jpg" id="thumbImage" class="hidden" alt="Thumb">
                 <button type="button" class="editor-thumb-dots" id="btnThumbOptions" title="Opções de mídia">
                   <i class="fa-solid fa-ellipsis"></i>
@@ -416,19 +416,19 @@
             <!-- Media / Video Canvas Area -->
             <div class="reels-media-layer" id="previewMediaLayer">
               <!-- Empty state placeholder (if media is removed) -->
-              <div class="media-empty-placeholder hidden" id="mediaEmptyPlaceholder">
-                <i class="fa-solid fa-circle-play text-4xl opacity-50"></i>
-                <span>Vídeo indisponível</span>
+              <div class="media-empty-placeholder" id="mediaEmptyPlaceholder">
+                <i class="fa-regular fa-image text-4xl opacity-50"></i>
+                <span>Adicione uma mídia para visualizar</span>
               </div>
 
               <!-- Uploaded Image Preview -->
               <img id="previewImage" class="reels-active-media hidden" alt="Pré-visualização">
 
-              <!-- Active Video Element (CLIP6.mp4 sem autoplay) -->
-              <video id="previewVideo" class="reels-active-media" loop playsinline muted src="assets/CLIP6.mp4" style="display: block;"></video>
+              <!-- O vídeo só aparece após o usuário selecionar um arquivo. -->
+              <video id="previewVideo" class="reels-active-media" loop playsinline muted></video>
 
               <!-- Video Center Playback Controls Overlay (Screenshot 3) -->
-              <div class="reels-video-controls-overlay" id="videoControlsOverlay">
+              <div class="reels-video-controls-overlay hidden" id="videoControlsOverlay">
                 <!-- Video Buttons (Rewind, Play/Pause, Forward) -->
                 <div class="reels-playback-buttons">
                   <button type="button" class="btn-reel-ctrl text-xl" id="btnReelRewind" title="Voltar 5 segundos">
@@ -537,15 +537,28 @@
               <button type="button" class="filter-pill" data-filter="post">Posts</button>
               <button type="button" class="filter-pill" data-filter="story">Stories</button>
             </div>
+            <div class="calendar-status-filter" id="calendarStatusFilter">
+              <button type="button" class="filter-pill status-filter-trigger" id="btnStatusFilter" aria-expanded="false" aria-controls="statusFilterMenu">
+                <i class="fa-solid fa-filter mr-1"></i>
+                <span>Status: <span id="statusFilterSummary">Agendado</span></span>
+                <i class="fa-solid fa-chevron-down ml-1 text-[10px]"></i>
+              </button>
+              <div class="calendar-status-menu" id="statusFilterMenu" role="group" aria-label="Status para exibir" aria-hidden="true">
+                <label><input type="checkbox" data-status-filter="scheduled" checked> Agendado</label>
+                <label><input type="checkbox" data-status-filter="processing"> Publicando</label>
+                <label><input type="checkbox" data-status-filter="published"> Publicado</label>
+                <label><input type="checkbox" data-status-filter="failed"> Falhou</label>
+              </div>
+            </div>
           </div>
 
           <div class="flex items-center gap-3">
             <!-- View Mode Toggle (Calendário / Lista) -->
             <div class="view-mode-toggle">
-              <button type="button" class="btn-mode-toggle active" id="btnModeCalendar">
+              <button type="button" class="btn-mode-toggle" id="btnModeCalendar">
                 <i class="fa-solid fa-calendar-days mr-1"></i> Calendário
               </button>
-              <button type="button" class="btn-mode-toggle" id="btnModeList">
+              <button type="button" class="btn-mode-toggle active" id="btnModeList">
                 <i class="fa-solid fa-list-ul mr-1"></i> Lista
               </button>
             </div>
@@ -559,7 +572,7 @@
         </div>
 
         <!-- 1. Calendar Month Grid View -->
-        <div class="calendar-grid-wrapper" id="calendarGridView">
+        <div class="calendar-grid-wrapper hidden" id="calendarGridView">
           <div class="calendar-header-row">
             <div class="calendar-day-name">Dom</div>
             <div class="calendar-day-name">Seg</div>
@@ -575,7 +588,7 @@
         </div>
 
         <!-- 2. List View (Table) -->
-        <div class="calendar-grid-wrapper hidden" id="calendarListView">
+        <div class="calendar-grid-wrapper" id="calendarListView">
           <div class="schedule-table-wrap">
             <table class="schedule-table">
               <thead>
@@ -593,6 +606,184 @@
                 <!-- Preenchido dinamicamente -->
               </tbody>
             </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- VIEW 3: Análises da Conta (Apple Minimalist Aesthetics) -->
+    <div class="app-view" id="viewAnalises">
+      <div class="analises-container">
+
+        <!-- Apple Header Toolbar -->
+        <div class="analises-header">
+          <div class="analises-header-title-group">
+            <h2>
+              <span>Análises de Desempenho</span>
+              <span class="analises-account-badge">
+                <span class="analises-pulse-dot"></span>
+                @alesantorooficial
+              </span>
+            </h2>
+            <p id="analyticsFreshness" aria-live="polite">
+              <i class="fa-solid fa-arrows-rotate text-xs text-emerald-600"></i>
+              Consultando os Insights atuais da Meta…
+            </p>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <!-- Apple Segmented Control (Tabs de Período) -->
+            <div class="apple-segmented-control" role="tablist">
+              <button type="button" class="apple-segment-btn" id="btnPeriodToday">Hoje</button>
+              <button type="button" class="apple-segment-btn" id="btnPeriod7d">1 semana</button>
+              <button type="button" class="apple-segment-btn active" id="btnPeriod30d">30 dias</button>
+            </div>
+
+            <!-- Refresh Button -->
+            <button type="button" class="apple-icon-btn" id="btnRefreshAnalises" title="Atualizar métricas">
+              <i class="fa-solid fa-rotate-right text-xs"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Apple KPI Metrics Cards Grid -->
+        <div class="analises-kpi-grid">
+          <!-- Card 1: Visualizações da Conta -->
+          <div class="apple-metric-card">
+            <div class="apple-metric-card-header">
+              <span class="apple-metric-label">Visualizações da Conta</span>
+              <div class="apple-metric-icon-wrap apple-icon-blue">
+                <i class="fa-solid fa-eye"></i>
+              </div>
+            </div>
+            <div class="apple-metric-value-row">
+              <span class="apple-metric-value" id="metricAccountViews">—</span>
+              <span class="apple-trend-badge apple-trend-positive" id="metricViewsTrend" hidden>
+                <i class="fa-solid fa-arrow-trend-up"></i>
+              </span>
+            </div>
+            <div class="apple-metric-footer apple-metric-footer--stacked">
+              <span>Visualizações no período selecionado</span>
+              <span class="apple-metric-subvalue" id="metricViews24h">Últimas 24 horas: —</span>
+            </div>
+          </div>
+
+          <!-- Card 2: Alcance da Conta -->
+          <div class="apple-metric-card">
+            <div class="apple-metric-card-header">
+              <span class="apple-metric-label">Alcance da Conta</span>
+              <div class="apple-metric-icon-wrap apple-icon-purple">
+                <i class="fa-solid fa-tower-broadcast"></i>
+              </div>
+            </div>
+            <div class="apple-metric-value-row">
+              <span class="apple-metric-value" id="metricAccountReach">—</span>
+              <span class="apple-trend-badge apple-trend-positive" id="metricReachTrend" hidden>
+                <i class="fa-solid fa-arrow-trend-up"></i>
+              </span>
+            </div>
+            <div class="apple-metric-footer apple-metric-footer--stacked">
+              <span>Contas únicas no período selecionado</span>
+              <span class="apple-metric-subvalue" id="metricReach24h">Últimas 24 horas: —</span>
+            </div>
+          </div>
+
+          <!-- Card 3: Seguidores atuais -->
+          <div class="apple-metric-card">
+            <div class="apple-metric-card-header">
+              <span class="apple-metric-label">Seguidores atuais</span>
+              <div class="apple-metric-icon-wrap apple-icon-green">
+                <i class="fa-solid fa-user-plus"></i>
+              </div>
+            </div>
+            <div class="apple-metric-value-row">
+              <span class="apple-metric-value" id="metricFollowersCount">—</span>
+            </div>
+            <div class="apple-metric-footer apple-metric-footer--stacked">
+              <span>Total atual da conta</span>
+              <span class="apple-metric-subvalue" id="metricFollows24h">Últimas 24 horas: ganhos — · perdas —</span>
+            </div>
+          </div>
+
+          <!-- Card 4: Reels Publicados -->
+          <div class="apple-metric-card">
+            <div class="apple-metric-card-header">
+              <span class="apple-metric-label">Reels Publicados</span>
+              <div class="apple-metric-icon-wrap apple-icon-amber">
+                <i class="fa-solid fa-clapperboard"></i>
+              </div>
+            </div>
+            <div class="apple-metric-value-row">
+              <span class="apple-metric-value" id="metricReelsCount">— Reels</span>
+            </div>
+            <div class="apple-metric-footer apple-metric-footer--stacked">
+              <span id="metricReels24h" class="apple-metric-subvalue">Publicados nas últimas 24 horas: —</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Apple Main Chart Card (Visualizações da Conta) -->
+        <div class="apple-chart-card">
+          <div class="apple-chart-card-header">
+            <div class="apple-chart-title-group">
+              <h3>Visualizações da Conta ao Longo do Tempo</h3>
+              <p id="appleChartRange">Visualizações diárias consultadas na Meta no período selecionado.</p>
+            </div>
+            <div class="apple-chart-legend">
+              <div class="apple-legend-item">
+                <span class="apple-legend-dot-views"></span>
+                <span>Visualizações Diárias</span>
+              </div>
+              <div class="apple-legend-item">
+                <span class="apple-legend-badge-reels">
+                  <i class="fa-solid fa-play"></i>
+                </span>
+                <span>Reels Postados (Capa Compacta)</span>
+              </div>
+              <button type="button" class="apple-legend-item apple-legend-toggle" id="btnToggleChartAverage" aria-pressed="true" title="Ocultar linha de média">
+                <span class="apple-average-line-indicator" aria-hidden="true"></span>
+                <span>Média do período: <strong id="appleChartAverageValue">—</strong></span>
+                <i class="fa-solid fa-eye" aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- Interactive Chart Canvas / SVG Area -->
+          <div class="apple-chart-wrapper" id="appleChartWrapper">
+            <!-- Barra Lateral com Valores (Lateral Y-Axis) -->
+            <div class="apple-chart-y-axis" id="appleChartYAxis">
+                <!-- Escala preenchida com os valores reais do período -->
+            </div>
+
+            <!-- SVG Container -->
+            <div class="apple-chart-svg-container" id="appleChartSvgContainer">
+              <!-- SVG Curve, Gradient & Gridlines renderizados via JS -->
+            </div>
+
+            <!-- Capas Compactas dos Reels no Gráfico -->
+            <div class="apple-reel-pin-group" id="appleReelPinGroup">
+              <!-- Marcadores de capas de Reels renderizados dinamicamente -->
+            </div>
+
+            <!-- Eixo Horizontal de Datas (Datas na base) -->
+            <div class="apple-chart-x-axis" id="appleChartXAxis">
+              <!-- Preenchido dinamicamente com datas -->
+            </div>
+
+            <!-- Tooltip Flutuante estilo Apple ao passar o mouse -->
+            <div class="apple-chart-tooltip" id="appleChartTooltip"></div>
+          </div>
+        </div>
+
+        <!-- Recent Reels Section (Grade de Reels Publicados) -->
+        <div class="analises-reels-section">
+          <div class="analises-reels-header">
+            <h3>Reels Publicados no Período</h3>
+            <span id="appleReelsCountBadge">Carregando...</span>
+          </div>
+          <div class="apple-reels-grid" id="appleReelsGrid">
+            <!-- Cards compactos de reels preenchidos dinamicamente -->
           </div>
         </div>
 
@@ -635,13 +826,26 @@
         <div>
           <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Legenda da Publicação</label>
           <p class="text-sm text-gray-800 bg-white p-3 rounded-lg border border-gray-200 whitespace-pre-wrap leading-relaxed" id="modalDetailCaption"></p>
+          <div class="hidden mt-3 grid grid-cols-2 gap-3" id="modalEditDateTimeFields">
+            <label class="block text-xs font-semibold text-gray-600">Data
+              <input id="modalEditDate" type="date" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+            </label>
+            <label class="block text-xs font-semibold text-gray-600">Horário
+              <input id="modalEditTime" type="time" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+            </label>
+          </div>
+          <label class="hidden mt-3 block text-xs font-semibold text-gray-600" id="modalEditCaptionField">Legenda e hashtags
+            <textarea id="modalEditCaption" rows="6" maxlength="2200" class="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-normal leading-relaxed"></textarea>
+          </label>
         </div>
       </div>
       <div class="p-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-2">
-        <button type="button" class="px-4 py-2 rounded-lg text-sm font-semibold bg-gray-200 text-gray-700 hover:bg-gray-300" onclick="document.getElementById('postDetailModal').classList.remove('active')">Fechar</button>
+        <button type="button" class="px-4 py-2 rounded-lg text-sm font-semibold bg-gray-200 text-gray-700 hover:bg-gray-300" id="btnClosePostDetail">Fechar</button>
+        <button type="button" class="hidden px-4 py-2 rounded-lg text-sm font-semibold bg-gray-200 text-gray-700 hover:bg-gray-300" id="btnCancelPostEdit">Cancelar</button>
         <button type="button" class="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700" id="btnEditFromModal">
-          <i class="fa-solid fa-pen mr-1.5 text-xs"></i> Abrir no Editor
+          <i class="fa-solid fa-pen mr-1.5 text-xs"></i> Editar publicação
         </button>
+        <button type="button" class="hidden px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700" id="btnSavePostEdit">Salvar alterações</button>
       </div>
     </div>
   </div>
@@ -801,7 +1005,11 @@
     }
   </style>
 
+  <!-- Floating Apple Popover para Detalhes do Reel no Gráfico -->
+  <div class="apple-reel-popover" id="appleReelPopover"></div>
+
   <!-- Application Logic -->
+  <script src="js/analises.js?v=meta-insights-20260923"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

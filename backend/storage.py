@@ -72,11 +72,13 @@ class StoryStore:
             self._write(records)
         return record
 
-    def update_schedule(self, schedule_id: str, patch: dict) -> dict | None:
+    def update_schedule(self, schedule_id: str, patch: dict, *, expected_status: str | None = None) -> dict | None:
         with self._lock:
             records = self._read()
             for record in records:
                 if record.get("id") == schedule_id:
+                    if expected_status is not None and record.get("status") != expected_status:
+                        return None
                     record.update({key: value for key, value in patch.items() if key not in {"id", "created_at"}})
                     record["updated_at"] = utc_now_iso()
                     self._write(records)

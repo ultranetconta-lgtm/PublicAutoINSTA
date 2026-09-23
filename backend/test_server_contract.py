@@ -12,9 +12,169 @@ from backend.server import (
     validate_story_request,
 )
 from backend.storage import StoryStore
+from backend.story_service import MetaAPIError
 
 
 class ServerContractTests(unittest.TestCase):
+    def test_invalid_reel_schedule_does_not_create_an_upload(self):
+        config = AppConfig(
+            access_token="secret-token", instagram_user_id="123",
+            instagram_username="alesantorooficial", graph_api_base_url="https://graph.instagram.com",
+            graph_api_version="v26.0", public_base_url="https://public.example",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            application = StoryApplication(
+                config, store=StoryStore(Path(temp_dir) / "schedules.json"),
+                service=object(), media_probe=lambda url, size: None,
+                video_converter=lambda path: None,
+            )
+            application.uploads_path = Path(temp_dir) / "uploads"
+            application.uploads_path.mkdir()
+            with self.assertRaisesRegex(ValueError, "invalid_scheduled_at"):
+                application.create_reel(
+                    {"action": "schedule", "scheduled_at": "not-a-date"},
+                    {"filename": "reel.mp4", "content_type": "video/mp4", "content": b"mp4"},
+                )
+            self.assertEqual(list(application.uploads_path.iterdir()), [])
+
+    def test_invalid_reel_is_rejected_and_unlinked_before_scheduling(self):
+        config = AppConfig(
+            access_token="secret-token", instagram_user_id="123",
+            instagram_username="alesantorooficial", graph_api_base_url="https://graph.instagram.com",
+            graph_api_version="v26.0", public_base_url="https://public.example",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            application = StoryApplication(
+                config, store=StoryStore(Path(temp_dir) / "schedules.json"),
+                service=object(), media_probe=lambda url, size: None,
+            )
+            application.uploads_path = Path(temp_dir) / "uploads"
+            application.uploads_path.mkdir()
+
+            with self.assertRaisesRegex(ValueError, "reel_conversion_failed"):
+                application.create_reel(
+                    {"action": "schedule", "scheduled_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()},
+                    {"filename": "invalid.mp4", "content_type": "video/mp4", "content": b"not a movie"},
+                )
+            self.assertEqual(application.store.list_schedules(), [])
+            self.assertEqual(list(application.uploads_path.iterdir()), [])
+
+    def test_due_reel_checks_public_media_again_before_meta(self):
+        class UnusedService:
+            def publish_reel(self, *args, **kwargs):
+                raise AssertionError("Meta must not receive an inaccessible URL")
+
+        checks = 0
+
+        def probe(url, size):
+            nonlocal checks
+            checks += 1
+            if checks == 2:
+                raise ValueError("Mídia pública inacessível: túnel encerrado")
+
+        config = AppConfig(
+            access_token="secret-token", instagram_user_id="123",
+            instagram_username="alesantorooficial", graph_api_base_url="https://graph.instagram.com",
+            graph_api_version="v26.0", public_base_url="https://public.example",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            application = StoryApplication(
+                config, store=StoryStore(Path(temp_dir) / "schedules.json"),
+                service=UnusedService(), media_probe=probe,
+                video_converter=lambda path: None,
+            )
+            application.uploads_path = Path(temp_dir) / "uploads"
+            application.uploads_path.mkdir()
+            record = application.create_reel(
+                {"action": "schedule", "scheduled_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()},
+                {"filename": "reel.mp4", "content_type": "video/mp4", "content": b"mp4"},
+            )
+            application.store.update_schedule(record["id"], {
+                "scheduled_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+            })
+
+            self.assertEqual(application.run_due_schedules(), 0)
+            failed = application.store.list_schedules()[0]
+            self.assertEqual(checks, 2)
+            self.assertEqual(failed["status"], "failed")
+            self.assertIn("túnel encerrado", failed["error"])
+            self.assertNotIn("container_id", failed)
+
+    def test_unreachable_public_media_prevents_scheduling(self):
+        class UnusedService:
+            def publish_reel(self, *args, **kwargs):
+                self.fail("Meta must not receive an inaccessible URL")
+
+        config = AppConfig(
+            access_token="secret-token",
+            instagram_user_id="123",
+            instagram_username="alesantorooficial",
+            graph_api_base_url="https://graph.instagram.com",
+            graph_api_version="v26.0",
+            public_base_url="https://expired.example",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            application = StoryApplication(
+                config,
+                store=StoryStore(Path(temp_dir) / "schedules.json"),
+                service=UnusedService(),
+                media_probe=lambda url, size: (_ for _ in ()).throw(ValueError("Mídia pública inacessível: DNS")),
+                video_converter=lambda path: None,
+            )
+            application.uploads_path = Path(temp_dir) / "uploads"
+            application.uploads_path.mkdir()
+            with self.assertRaisesRegex(ValueError, "Mídia pública inacessível"):
+                application.create_reel(
+                    {"action": "schedule", "scheduled_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()},
+                    {"filename": "reel.mp4", "content_type": "video/mp4", "content": b"mp4"},
+                )
+            self.assertEqual(application.store.list_schedules(), [])
+
+    def test_failed_scheduled_reel_retains_container_id_and_meta_detail(self):
+        class FailedService:
+            def publish_reel(self, media_url, caption, graduation_strategy):
+                raise MetaAPIError(
+                    "Meta container status: ERROR — Media could not be fetched.",
+                    container_id="failed-container-42",
+                )
+
+        config = AppConfig(
+            access_token="secret-token",
+            instagram_user_id="123",
+            instagram_username="alesantorooficial",
+            graph_api_base_url="https://graph.instagram.com",
+            graph_api_version="v26.0",
+            public_base_url="https://public.example",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            application = StoryApplication(
+                config,
+                store=StoryStore(Path(temp_dir) / "schedules.json"),
+                service=FailedService(),
+                media_probe=lambda url, size: None,
+                video_converter=lambda path: None,
+            )
+            application.uploads_path = Path(temp_dir) / "uploads"
+            application.uploads_path.mkdir()
+            record = application.create_reel(
+                {
+                    "action": "schedule",
+                    "scheduled_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
+                    "caption": "Teste",
+                },
+                {"filename": "reel.mp4", "content_type": "video/mp4", "content": b"mp4"},
+            )
+            application.store.update_schedule(record["id"], {
+                "scheduled_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+            })
+
+            self.assertEqual(application.run_due_schedules(), 0)
+            failed = application.store.list_schedules()[0]
+            self.assertEqual(failed["status"], "failed")
+            self.assertEqual(failed["container_id"], "failed-container-42")
+            self.assertIn("Media could not be fetched", failed["error"])
+            self.assertNotIn("secret-token", json.dumps(failed))
+
     def test_trial_reel_publish_persists_meta_result_without_calling_real_api(self):
         class FakeService:
             def publish_reel(self, media_url, caption, graduation_strategy):
@@ -35,6 +195,8 @@ class ServerContractTests(unittest.TestCase):
                 config,
                 store=StoryStore(Path(temp_dir) / "schedules.json"),
                 service=fake_service,
+                media_probe=lambda url, size: None,
+                video_converter=lambda path: None,
             )
             application.uploads_path = Path(temp_dir) / "uploads"
             application.uploads_path.mkdir()
@@ -85,7 +247,7 @@ class ServerContractTests(unittest.TestCase):
             public_base_url="",
         )
         with tempfile.TemporaryDirectory() as temp_dir:
-            application = StoryApplication(config, store=StoryStore(Path(temp_dir) / "schedules.json"), service=object())
+            application = StoryApplication(config, store=StoryStore(Path(temp_dir) / "schedules.json"), service=object(), media_probe=lambda url, size: None)
             application.uploads_path = Path(temp_dir) / "uploads"
             application.uploads_path.mkdir()
             with self.assertRaisesRegex(ValueError, "public_media_not_configured"):
@@ -115,6 +277,7 @@ class ServerContractTests(unittest.TestCase):
                 config,
                 store=StoryStore(Path(temp_dir) / "schedules.json"),
                 service=fake_service,
+                media_probe=lambda url, size: None,
             )
             application.uploads_path = Path(temp_dir) / "uploads"
             application.uploads_path.mkdir()
@@ -147,6 +310,7 @@ class ServerContractTests(unittest.TestCase):
                 config,
                 store=StoryStore(Path(temp_dir) / "schedules.json"),
                 service=FakeService(),
+                media_probe=lambda url, size: None,
             )
             application.uploads_path = Path(temp_dir) / "uploads"
             application.uploads_path.mkdir()
@@ -177,6 +341,7 @@ class ServerContractTests(unittest.TestCase):
                 config,
                 store=StoryStore(Path(temp_dir) / "schedules.json"),
                 service=FakeService(),
+                media_probe=lambda url, size: None,
             )
             application.uploads_path = Path(temp_dir) / "uploads"
             application.uploads_path.mkdir()
@@ -213,6 +378,7 @@ class ServerContractTests(unittest.TestCase):
                 config,
                 store=StoryStore(Path(temp_dir) / "schedules.json"),
                 service=FakeService(),
+                media_probe=lambda url, size: None,
             )
             application.uploads_path = Path(temp_dir) / "uploads"
             application.uploads_path.mkdir()

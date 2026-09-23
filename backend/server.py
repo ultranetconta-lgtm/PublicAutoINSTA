@@ -6,20 +6,25 @@ import argparse
 import json
 import mimetypes
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from email.parser import BytesParser
 from email.policy import default
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, unquote, urlparse
+from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 if __package__:
     from .storage import StoryStore, build_public_media_url, utc_now_iso
@@ -34,6 +39,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 API_ENV_PATH = PROJECT_ROOT / "api" / ".env"
 DATA_PATH = PROJECT_ROOT / "backend" / "data" / "schedules.json"
 UPLOADS_PATH = PROJECT_ROOT / "backend" / "uploads"
+ANALYTICS_CACHE_TTL_SECONDS = 20.0
+ANALYTICS_META_CONCURRENCY = 5
+ANALYTICS_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 SUPPORTED_TYPES = {
     "image/jpeg": ("image", ".jpg"),
@@ -126,6 +134,51 @@ def media_kind_for_upload(media: dict | None) -> tuple[str, str]:
     raise ValueError("unsupported_media_type")
 
 
+def verify_public_media(media_url: str, expected_size: int) -> None:
+    """Confirm that Meta can address the exact uploaded file before creating a container."""
+    try:
+        with urlopen(Request(media_url, method="HEAD"), timeout=10) as response:
+            content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
+            content_length = response.headers.get("Content-Length", "")
+            if response.status != 200 or content_type not in {"video/mp4", "image/jpeg", "video/quicktime"}:
+                raise ValueError("Mídia pública inacessível: resposta HTTPS inesperada.")
+            if not content_length.isdigit() or int(content_length) != expected_size:
+                raise ValueError("Mídia pública inacessível: tamanho do arquivo diferente no endereço público.")
+    except HTTPError as exc:
+        raise ValueError(f"Mídia pública inacessível: HTTP {exc.code} no endereço configurado.") from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise ValueError("Mídia pública inacessível: verifique o túnel HTTPS e PUBLIC_BASE_URL.") from exc
+
+
+def normalize_reel_video(path: Path) -> None:
+    """Remux a Reel to a fast-start MP4 without edit lists before Meta fetches it."""
+    ffmpeg = os.environ.get("FFMPEG_BIN") or shutil.which("ffmpeg")
+    if not ffmpeg:
+        local_ffmpeg = Path.home() / ".local" / "bin" / "ffmpeg"
+        ffmpeg = str(local_ffmpeg) if local_ffmpeg.is_file() else None
+    if not ffmpeg:
+        raise ValueError("reel_conversion_unavailable")
+
+    output = path.with_name(f"{path.stem}.{uuid.uuid4().hex}.normalized.mp4")
+    try:
+        subprocess.run(
+            [
+                ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+                "-i", str(path), "-map", "0:v:0", "-map", "0:a:0?",
+                "-c", "copy", "-map_metadata", "-1", "-movflags", "+faststart",
+                "-use_editlist", "0", "-f", "mp4", str(output),
+            ],
+            check=True, capture_output=True, timeout=120,
+        )
+        if output.stat().st_size == 0:
+            raise ValueError("reel_conversion_failed")
+        os.replace(output, path)
+    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+        raise ValueError("reel_conversion_failed") from exc
+    finally:
+        output.unlink(missing_ok=True)
+
+
 def validate_story_request(fields: dict, media: dict | None) -> tuple[str, str, datetime | None]:
     action = fields.get("action", "").strip()
     if action not in {"publish_now", "schedule"}:
@@ -161,6 +214,37 @@ def validate_reel_request(fields: dict, media: dict | None) -> tuple[str, str]:
     return action, strategy
 
 
+def validate_schedule_edit(payload: dict) -> dict:
+    allowed = {"scheduled_at", "caption"}
+    if not payload or set(payload) - allowed:
+        raise ValueError("invalid_schedule_update")
+
+    patch: dict[str, str] = {}
+    if "scheduled_at" in payload:
+        raw_scheduled_at = payload["scheduled_at"]
+        if not isinstance(raw_scheduled_at, str) or not raw_scheduled_at.strip():
+            raise ValueError("scheduled_at_required")
+        try:
+            scheduled_at = datetime.fromisoformat(raw_scheduled_at.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("invalid_scheduled_at") from exc
+        if scheduled_at.tzinfo is None:
+            raise ValueError("scheduled_at_timezone_required")
+        if scheduled_at <= datetime.now(timezone.utc):
+            raise ValueError("scheduled_at_must_be_future")
+        patch["scheduled_at"] = scheduled_at.isoformat()
+
+    if "caption" in payload:
+        caption = payload["caption"]
+        if not isinstance(caption, str):
+            raise ValueError("invalid_schedule_update")
+        if len(caption) > 2200:
+            raise ValueError("caption_too_long")
+        patch["caption"] = caption.strip()
+
+    return patch
+
+
 def parse_multipart(content_type: str, body: bytes) -> tuple[dict, dict | None]:
     envelope = BytesParser(policy=default).parsebytes(
         b"MIME-Version: 1.0\r\nContent-Type: " + content_type.encode("utf-8") + b"\r\n\r\n" + body
@@ -186,7 +270,10 @@ def parse_multipart(content_type: str, body: bytes) -> tuple[dict, dict | None]:
 
 
 class StoryApplication:
-    def __init__(self, config: AppConfig | None = None, *, store: StoryStore | None = None, service=None) -> None:
+    def __init__(
+        self, config: AppConfig | None = None, *, store: StoryStore | None = None,
+        service=None, media_probe=None, video_converter=None,
+    ) -> None:
         self.config = config or AppConfig.load()
         self.store = store or StoryStore(DATA_PATH)
         self.uploads_path = UPLOADS_PATH
@@ -201,6 +288,10 @@ class StoryApplication:
             if self.config.access_token and self.config.instagram_user_id
             else None
         )
+        self.media_probe = media_probe or verify_public_media
+        self.video_converter = video_converter or normalize_reel_video
+        self._analytics_snapshot_lock = threading.Lock()
+        self._analytics_snapshot: tuple[float, dict, list[dict]] | None = None
         self.store.recover_processing()
 
     def health(self) -> dict:
@@ -220,6 +311,14 @@ class StoryApplication:
             build_public_media_url(self.config.public_base_url, "configuration-check.jpg")
         except ValueError as exc:
             raise ValueError("public_media_not_configured") from exc
+
+    @staticmethod
+    def _failure_patch(exc: Exception) -> dict:
+        patch = {"status": "failed", "error": str(exc)}
+        container_id = getattr(exc, "container_id", None)
+        if container_id:
+            patch["container_id"] = container_id
+        return patch
 
     def _save_media(self, media: dict, extension: str) -> str:
         filename = f"{uuid.uuid4().hex}{extension}"
@@ -248,12 +347,23 @@ class StoryApplication:
             output_path.write_bytes(media["content"])
         return filename
 
+    def _save_public_media(self, media: dict, extension: str, *, normalize_video: bool = False) -> tuple[str, str]:
+        filename = self._save_media(media, extension)
+        media_url = build_public_media_url(self.config.public_base_url, filename)
+        try:
+            if normalize_video:
+                self.video_converter(self.uploads_path / filename)
+            self.media_probe(media_url, (self.uploads_path / filename).stat().st_size)
+        except Exception:
+            (self.uploads_path / filename).unlink(missing_ok=True)
+            raise
+        return filename, media_url
+
     def create_story(self, fields: dict, media: dict | None) -> dict:
         action, media_kind, scheduled_at = validate_story_request(fields, media)
         self._require_publish_configuration()
         _, extension = media_kind_for_upload(media)
-        filename = self._save_media(media, extension)
-        media_url = build_public_media_url(self.config.public_base_url, filename)
+        filename, media_url = self._save_public_media(media, extension)
         record_payload = {
             "type": "story",
             "media_filename": filename,
@@ -268,7 +378,7 @@ class StoryApplication:
         try:
             result = self.service.publish_story(media_url, media_kind)
         except (MetaAPIError, OSError, TimeoutError, ValueError) as exc:
-            failed = self.store.update_schedule(record["id"], {"status": "failed", "error": str(exc)})
+            failed = self.store.update_schedule(record["id"], self._failure_patch(exc))
             raise PublishRequestError("meta_publish_failed", str(exc), failed) from exc
         return self.store.update_schedule(
             record["id"],
@@ -284,20 +394,11 @@ class StoryApplication:
         action, graduation_strategy = validate_reel_request(fields, media)
         if not media:
             raise ValueError("media_required")
-        media_kind, extension = media_kind_for_upload(media)
+        media_kind, _ = media_kind_for_upload(media)
         if media_kind != "video":
             raise ValueError("reel_video_required")
         self._require_publish_configuration()
-        filename = self._save_media(media, extension)
-        media_url = build_public_media_url(self.config.public_base_url, filename)
-        record_payload = {
-            "type": "test_reel",
-            "media_filename": filename,
-            "media_kind": media_kind,
-            "caption": fields.get("caption", "").strip(),
-            "graduation_strategy": graduation_strategy,
-            "scheduled_at": utc_now_iso(),
-        }
+        scheduled_at = None
         if action == "schedule":
             raw_scheduled_at = fields.get("scheduled_at", "").strip()
             if not raw_scheduled_at:
@@ -310,7 +411,16 @@ class StoryApplication:
                 raise ValueError("scheduled_at_timezone_required")
             if scheduled_at <= datetime.now(timezone.utc):
                 raise ValueError("scheduled_at_must_be_future")
-            record_payload["scheduled_at"] = scheduled_at.isoformat()
+        filename, media_url = self._save_public_media(media, ".mp4", normalize_video=True)
+        record_payload = {
+            "type": "test_reel",
+            "media_filename": filename,
+            "media_kind": media_kind,
+            "caption": fields.get("caption", "").strip(),
+            "graduation_strategy": graduation_strategy,
+            "scheduled_at": scheduled_at.isoformat() if scheduled_at else utc_now_iso(),
+        }
+        if action == "schedule":
             return self.store.create_schedule(record_payload)
 
         record = self.store.create_schedule({**record_payload, "status": "processing"})
@@ -321,7 +431,7 @@ class StoryApplication:
                 graduation_strategy=graduation_strategy,
             )
         except (MetaAPIError, OSError, TimeoutError, ValueError) as exc:
-            failed = self.store.update_schedule(record["id"], {"status": "failed", "error": str(exc)})
+            failed = self.store.update_schedule(record["id"], self._failure_patch(exc))
             raise PublishRequestError("meta_publish_failed", str(exc), failed) from exc
         return self.store.update_schedule(
             record["id"],
@@ -340,6 +450,7 @@ class StoryApplication:
             try:
                 self._require_publish_configuration()
                 media_url = build_public_media_url(self.config.public_base_url, record["media_filename"])
+                self.media_probe(media_url, (self.uploads_path / record["media_filename"]).stat().st_size)
                 if record.get("type") == "test_reel":
                     result = self.service.publish_reel(
                         media_url,
@@ -356,8 +467,200 @@ class StoryApplication:
                 })
                 completed += 1
             except (MetaAPIError, OSError, TimeoutError, ValueError) as exc:
-                self.store.update_schedule(record["id"], {"status": "failed", "error": str(exc)})
+                self.store.update_schedule(record["id"], self._failure_patch(exc))
         return completed
+
+    def _get_analytics_snapshot(self, *, force_refresh: bool = False) -> tuple[dict, list[dict]]:
+        with self._analytics_snapshot_lock:
+            now = time.monotonic()
+            if (
+                not force_refresh
+                and self._analytics_snapshot
+                and now - self._analytics_snapshot[0] < ANALYTICS_CACHE_TTL_SECONDS
+            ):
+                return self._analytics_snapshot[1], self._analytics_snapshot[2]
+
+            profile: dict = {}
+            media_items: list[dict] = []
+            if self.service and hasattr(self.service, "get_profile"):
+                try:
+                    profile = self.service.get_profile()
+                except Exception:
+                    pass
+            if self.service and hasattr(self.service, "get_recent_media"):
+                try:
+                    media_items = self.service.get_recent_media(limit=100)
+                except Exception:
+                    pass
+
+            self._analytics_snapshot = (time.monotonic(), profile, media_items)
+            return profile, media_items
+
+    @staticmethod
+    def _analytics_datetime(day: date) -> datetime:
+        return datetime.combine(day, datetime.min.time(), tzinfo=ANALYTICS_TIMEZONE)
+
+    def get_analytics(self, period: str = "30d", *, force_refresh: bool = False) -> dict:
+        period = period.strip().lower()
+        if period not in {"30d", "7d", "today"}:
+            period = "30d"
+
+        if not self.service or not hasattr(self.service, "get_account_insights"):
+            raise MetaAPIError("Instagram account insights are not configured")
+
+        today = datetime.now(ANALYTICS_TIMEZONE).date()
+        days_count = {"today": 1, "7d": 7, "30d": 30}[period]
+        first_day = today - timedelta(days=days_count - 1)
+        day_after_today = today + timedelta(days=1)
+        first_timestamp = int(self._analytics_datetime(first_day).timestamp())
+        end_timestamp = int(self._analytics_datetime(day_after_today).timestamp())
+
+        profile, media_items = self._get_analytics_snapshot(force_refresh=force_refresh)
+        username = profile.get("username") or self.config.instagram_username or ""
+        followers_count = profile.get("followers_count")
+        media_count = profile.get("media_count")
+        profile_picture_url = profile.get("profile_picture_url") or "assets/avatar.jpg"
+
+        metrics = self.service.get_account_insights(
+            ["views", "reach"],
+            since=first_timestamp,
+            until=end_timestamp,
+        )
+
+        last_24_hours_until = int(time.time())
+        last_24_hours_since = last_24_hours_until - 24 * 60 * 60
+        try:
+            last_24_hours_metrics = self.service.get_account_insights(
+                ["views", "reach"],
+                since=last_24_hours_since,
+                until=last_24_hours_until,
+            )
+        except MetaAPIError:
+            last_24_hours_metrics = None
+
+        days = [first_day + timedelta(days=index) for index in range(days_count)]
+
+        def read_daily_views(day):
+            since = int(self._analytics_datetime(day).timestamp())
+            until = int(self._analytics_datetime(day + timedelta(days=1)).timestamp())
+            value = self.service.get_account_insights(["views"], since=since, until=until)["views"]
+            return day, value
+
+        with ThreadPoolExecutor(max_workers=ANALYTICS_META_CONCURRENCY) as executor:
+            daily_views = dict(executor.map(read_daily_views, days))
+
+        reels: list[dict] = []
+        reels_count_24h = 0
+        for item in media_items:
+            product_type = (item.get("media_product_type") or "").upper()
+            media_type = (item.get("media_type") or "").upper()
+            if product_type != "REELS" and media_type != "VIDEO":
+                continue
+            timestamp = item.get("timestamp") or ""
+            try:
+                published_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                if published_at.tzinfo is None:
+                    published_at = published_at.replace(tzinfo=timezone.utc)
+                if last_24_hours_since <= published_at.timestamp() <= last_24_hours_until:
+                    reels_count_24h += 1
+                published_day = published_at.astimezone(ANALYTICS_TIMEZONE).date()
+            except (TypeError, ValueError):
+                continue
+            if published_day < first_day or published_day > today:
+                continue
+
+            reel = {
+                "id": str(item.get("id")),
+                "caption": (item.get("caption") or "").strip() or "Reel sem legenda",
+                "thumbnail_url": item.get("thumbnail_url") or item.get("media_url") or "assets/avatar.jpg",
+                "permalink": item.get("permalink", f"https://www.instagram.com/{username}"),
+                "timestamp": timestamp,
+                "_published_day": published_day,
+            }
+            for field in ("like_count", "comments_count"):
+                value = item.get(field)
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    reel[field] = int(value)
+            reels.append(reel)
+
+        def read_media_views(reel):
+            try:
+                reel["views"] = self.service.get_media_views(reel["id"])
+            except (MetaAPIError, OSError, TimeoutError, ValueError):
+                # Keep the real Reel metadata; never estimate its views from likes.
+                pass
+            return reel
+
+        with ThreadPoolExecutor(max_workers=ANALYTICS_META_CONCURRENCY) as executor:
+            reels = list(executor.map(read_media_views, reels))
+
+        reels_by_day: dict[date, list[dict]] = {}
+        for reel in reels:
+            reels_by_day.setdefault(reel.pop("_published_day"), []).append(reel)
+
+        months_pt = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+        points = []
+        for day in days:
+            day_reels = reels_by_day.get(day, [])
+            label = "Hoje*" if day == today else f"{day.day:02d} {months_pt[day.month - 1]}"
+            points.append({
+                "date": day.isoformat(),
+                "label": label,
+                "views": daily_views[day],
+                "partial": day == today,
+                "reels": day_reels,
+            })
+
+        max_view = max((point["views"] for point in points), default=0)
+        ceiling = max(10000, ((max_view + 9999) // 10000) * 10000)
+        if ceiling < 10000:
+            ceiling = 10000
+        step = ceiling // 5
+        steps = [step * i for i in range(5, -1, -1)]
+
+        views = metrics["views"]
+        reach = metrics["reach"]
+        metrics = {
+            "views": views,
+            "views_formatted": f"{views / 1000:.1f}".replace(".", ",") + " mil" if views >= 1000 else str(views),
+            "reach": reach,
+            "reach_formatted": f"{reach / 1000:.1f}".replace(".", ",") + " mil" if reach >= 1000 else str(reach),
+            "followers_count": followers_count,
+            "reels_count": len(reels),
+            "views_24h": last_24_hours_metrics["views"] if last_24_hours_metrics else None,
+            "reach_24h": last_24_hours_metrics["reach"] if last_24_hours_metrics else None,
+            "reels_count_24h": reels_count_24h,
+        }
+
+        return {
+            "ok": True,
+            "period": period,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "timezone": "America/Sao_Paulo",
+            "freshness_notice": "A Meta pode levar até 48 horas para consolidar alguns Insights.",
+            "range": {
+                "start": first_day.isoformat(),
+                "end": today.isoformat(),
+                "days": days_count,
+                "today_partial": True,
+            },
+            "account": {
+                "username": username,
+                "media_count": media_count,
+                "profile_picture_url": profile_picture_url,
+            },
+            "metrics": metrics,
+            "chart": {
+                "lateral_axis": {
+                    "min": 0,
+                    "max": ceiling,
+                    "steps": steps,
+                    "labels": [f"{s // 1000}k" if s >= 1000 else "0" for s in steps],
+                },
+                "points": points,
+            },
+            "reels": reels,
+        }
 
 
 class PublishRequestError(RuntimeError):
@@ -408,6 +711,21 @@ class PlannerHandler(SimpleHTTPRequestHandler):
         if path == "/api/schedules":
             self._send_json(HTTPStatus.OK, {"schedules": self.application.store.list_schedules()})
             return
+        if path == "/api/analytics":
+            query_params = parse_qs(urlparse(self.path).query)
+            period = query_params.get("period", ["30d"])[0]
+            force_refresh = query_params.get("refresh", ["0"])[0] == "1"
+            try:
+                payload = self.application.get_analytics(period, force_refresh=force_refresh)
+            except MetaAPIError:
+                self._send_json(HTTPStatus.BAD_GATEWAY, {
+                    "ok": False,
+                    "error": "meta_insights_unavailable",
+                    "message": "A Meta não retornou Insights atuais. Atualize novamente em instantes.",
+                })
+                return
+            self._send_json(HTTPStatus.OK, payload)
+            return
         if path.startswith("/media/"):
             filename = Path(path.removeprefix("/media/")).name
             file_path = self.application.uploads_path / filename
@@ -424,6 +742,21 @@ class PlannerHandler(SimpleHTTPRequestHandler):
             super().do_GET()
             return
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+
+    def do_HEAD(self):  # noqa: N802
+        path = self._route_path()
+        if path.startswith("/media/"):
+            filename = Path(path.removeprefix("/media/")).name
+            file_path = self.application.uploads_path / filename
+            if filename != path.removeprefix("/media/") or not file_path.is_file():
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", mimetypes.guess_type(file_path.name)[0] or "application/octet-stream")
+            self.send_header("Content-Length", str(file_path.stat().st_size))
+            self.end_headers()
+            return
+        super().do_HEAD()
 
     def do_POST(self):  # noqa: N802
         route_path = self._route_path()
@@ -455,6 +788,41 @@ class PlannerHandler(SimpleHTTPRequestHandler):
         except Exception as exc:  # pragma: no cover - last-resort API boundary
             self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "internal_error", "message": str(exc)})
 
+    def do_PATCH(self):  # noqa: N802
+        prefix = "/api/schedules/"
+        path = self._route_path()
+        if not path.startswith(prefix):
+            self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+            return
+        schedule_id = path.removeprefix(prefix)
+        try:
+            if self.headers.get("Content-Type", "").split(";", 1)[0].lower() != "application/json":
+                raise ValueError("json_required")
+            payload = json.loads(self._read_body().decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("invalid_schedule_update")
+            patch = validate_schedule_edit(payload)
+            current = next(
+                (record for record in self.application.store.list_schedules() if record.get("id") == schedule_id),
+                None,
+            )
+            if current is None:
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": "schedule_not_found"})
+                return
+            if current.get("status") != "scheduled":
+                self._send_json(HTTPStatus.CONFLICT, {"error": "schedule_not_editable"})
+                return
+            updated = self.application.store.update_schedule(schedule_id, patch, expected_status="scheduled")
+            if updated is None:
+                self._send_json(HTTPStatus.CONFLICT, {"error": "schedule_not_editable"})
+                return
+            self._send_json(HTTPStatus.OK, {"schedule": updated})
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            code = "invalid_schedule_update" if isinstance(exc, json.JSONDecodeError) else str(exc) or "invalid_schedule_update"
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": code, "message": self._friendly_error(code)})
+        except Exception as exc:  # pragma: no cover - last-resort API boundary
+            self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "internal_error", "message": str(exc)})
+
     def do_DELETE(self):  # noqa: N802
         prefix = "/api/schedules/"
         path = self._route_path()
@@ -471,7 +839,16 @@ class PlannerHandler(SimpleHTTPRequestHandler):
             "public_media_not_configured": "Configure PUBLIC_BASE_URL com uma URL HTTPS pública para o Meta acessar a mídia.",
             "meta_not_configured": "Configure o token e o Instagram User ID no backend.",
             "reel_video_required": "Selecione um vídeo MP4 para o Reel de teste.",
+            "reel_conversion_unavailable": "FFmpeg não está instalado no servidor para preparar o vídeo do Reel.",
+            "reel_conversion_failed": "Não foi possível preparar o vídeo como MP4 compatível com Reels.",
             "graduation_strategy_invalid": "A estratégia do Reel de teste deve ser MANUAL ou SS_PERFORMANCE.",
+            "scheduled_at_required": "Informe a data e o horário da publicação.",
+            "invalid_scheduled_at": "Informe uma data e um horário válidos.",
+            "scheduled_at_timezone_required": "Não foi possível identificar o fuso horário.",
+            "scheduled_at_must_be_future": "A data e o horário precisam estar no futuro.",
+            "caption_too_long": "A legenda pode ter no máximo 2.200 caracteres.",
+            "invalid_schedule_update": "Os dados enviados para edição são inválidos.",
+            "json_required": "Não foi possível enviar as alterações.",
         }
         return messages.get(code, code)
 

@@ -193,6 +193,7 @@ document.addEventListener('DOMContentLoaded', () => {
         thumbImage.classList.add('hidden');
         thumbVideo.src = fileUrl;
         thumbVideo.classList.remove('hidden');
+        videoControlsOverlay.classList.remove('hidden');
 
         // Update phone preview
         mediaEmptyPlaceholder.classList.add('hidden');
@@ -473,60 +474,50 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // --- Tab Navigation: Criar Publicação vs Agendamentos ---
+  // --- Tab Navigation: Criar Publicação vs Agendamentos vs Análises ---
   const tabBtnPlanner = document.getElementById('tabBtnPlanner');
   const tabBtnAgendamentos = document.getElementById('tabBtnAgendamentos');
+  const tabBtnAnalises = document.getElementById('tabBtnAnalises');
   const viewPlanner = document.getElementById('viewPlanner');
   const viewAgendamentos = document.getElementById('viewAgendamentos');
+  const viewAnalises = document.getElementById('viewAnalises');
   const btnGoToPlanner = document.getElementById('btnGoToPlanner');
   const agendamentosCountBadge = document.getElementById('agendamentosCountBadge');
 
   function switchTab(tabName) {
+    if (tabBtnPlanner) tabBtnPlanner.classList.remove('active');
+    if (tabBtnAgendamentos) tabBtnAgendamentos.classList.remove('active');
+    if (tabBtnAnalises) tabBtnAnalises.classList.remove('active');
+    if (viewPlanner) viewPlanner.classList.remove('active');
+    if (viewAgendamentos) viewAgendamentos.classList.remove('active');
+    if (viewAnalises) viewAnalises.classList.remove('active');
+
     if (tabName === 'planner') {
-      tabBtnPlanner.classList.add('active');
-      tabBtnAgendamentos.classList.remove('active');
-      viewPlanner.classList.add('active');
-      viewAgendamentos.classList.remove('active');
+      if (tabBtnPlanner) tabBtnPlanner.classList.add('active');
+      if (viewPlanner) viewPlanner.classList.add('active');
     } else if (tabName === 'agendamentos') {
-      tabBtnAgendamentos.classList.add('active');
-      tabBtnPlanner.classList.remove('active');
-      viewAgendamentos.classList.add('active');
-      viewPlanner.classList.remove('active');
+      if (tabBtnAgendamentos) tabBtnAgendamentos.classList.add('active');
+      if (viewAgendamentos) viewAgendamentos.classList.add('active');
       renderCalendar();
       renderListView();
+    } else if (tabName === 'analises') {
+      if (tabBtnAnalises) tabBtnAnalises.classList.add('active');
+      if (viewAnalises) viewAnalises.classList.add('active');
+      if (window.AnalisesModule) {
+        window.AnalisesModule.init();
+      }
     }
   }
 
-  tabBtnPlanner.addEventListener('click', () => switchTab('planner'));
-  tabBtnAgendamentos.addEventListener('click', () => switchTab('agendamentos'));
+  if (tabBtnPlanner) tabBtnPlanner.addEventListener('click', () => switchTab('planner'));
+  if (tabBtnAgendamentos) tabBtnAgendamentos.addEventListener('click', () => switchTab('agendamentos'));
+  if (tabBtnAnalises) tabBtnAnalises.addEventListener('click', () => switchTab('analises'));
   if (btnGoToPlanner) {
     btnGoToPlanner.addEventListener('click', () => switchTab('planner'));
   }
 
   // --- Scheduled Posts Data Store ---
   let scheduledPosts = [
-    {
-      id: 'post-1',
-      date: '2026-09-22',
-      time: '08:49',
-      type: 'test_reel',
-      typeLabel: 'Reels de teste',
-      media: 'assets/CLIP6.mp4',
-      isVideo: true,
-      caption: 'Novos testes de Reels automáticos no ar! 🔥 Confira o desempenho.',
-      status: 'Agendado'
-    },
-    {
-      id: 'post-2',
-      date: '2026-09-24',
-      time: '18:00',
-      type: 'reel',
-      typeLabel: 'Reel',
-      media: 'assets/CLIP6.mp4',
-      isVideo: true,
-      caption: 'Bastidores do novo ensaio 🔥 Confira os novos detalhes da coleção! #moda #lifestyle',
-      status: 'Agendado'
-    },
     {
       id: 'post-3',
       date: '2026-09-26',
@@ -592,6 +583,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let calCurrentYear = 2026;
   let calCurrentMonth = 8; // 0-indexed: 8 is September
   let currentFilter = 'all';
+  const selectedStatusFilters = new Set(['scheduled']);
 
   const monthNames = [
     'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -601,6 +593,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const calendarCurrentMonthLabel = document.getElementById('calendarCurrentMonthLabel');
   const calendarMonthGrid = document.getElementById('calendarMonthGrid');
   const scheduleTableBody = document.getElementById('scheduleTableBody');
+  let quickEditPostId = null;
+  const calendarStatusFilter = document.getElementById('calendarStatusFilter');
+  const btnStatusFilter = document.getElementById('btnStatusFilter');
+  const statusFilterMenu = document.getElementById('statusFilterMenu');
+  const statusFilterSummary = document.getElementById('statusFilterSummary');
 
   // Month navigation
   document.getElementById('btnCalPrevMonth').addEventListener('click', () => {
@@ -629,6 +626,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Filters
   document.querySelectorAll('.filter-pill').forEach(pill => {
+    if (pill.closest('#calendarStatusFilter')) return;
     pill.addEventListener('click', () => {
       document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
       pill.classList.add('active');
@@ -637,6 +635,58 @@ document.addEventListener('DOMContentLoaded', () => {
       renderListView();
     });
   });
+
+  const statusFilterLabels = {
+    scheduled: 'Agendado',
+    processing: 'Publicando',
+    published: 'Publicado',
+    failed: 'Falhou'
+  };
+
+  function updateStatusFilterSummary() {
+    const selected = [...selectedStatusFilters];
+    if (selected.length === 0) statusFilterSummary.innerText = 'Nenhum';
+    else if (selected.length === 1) statusFilterSummary.innerText = statusFilterLabels[selected[0]];
+    else if (selected.length === Object.keys(statusFilterLabels).length) statusFilterSummary.innerText = 'Todos';
+    else statusFilterSummary.innerText = `${selected.length} selecionados`;
+  }
+
+  function closeStatusFilterMenu() {
+    statusFilterMenu.classList.remove('open');
+    statusFilterMenu.setAttribute('aria-hidden', 'true');
+    btnStatusFilter.setAttribute('aria-expanded', 'false');
+  }
+
+  btnStatusFilter.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const isOpening = !statusFilterMenu.classList.contains('open');
+    statusFilterMenu.classList.toggle('open', isOpening);
+    statusFilterMenu.setAttribute('aria-hidden', String(!isOpening));
+    btnStatusFilter.setAttribute('aria-expanded', String(isOpening));
+  });
+
+  statusFilterMenu.querySelectorAll('[data-status-filter]').forEach(checkbox => {
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) selectedStatusFilters.add(checkbox.dataset.statusFilter);
+      else selectedStatusFilters.delete(checkbox.dataset.statusFilter);
+      updateStatusFilterSummary();
+      renderCalendar();
+      renderListView();
+    });
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!calendarStatusFilter.contains(event.target)) closeStatusFilterMenu();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && statusFilterMenu.classList.contains('open')) {
+      closeStatusFilterMenu();
+      btnStatusFilter.focus();
+    }
+  });
+
+  updateStatusFilterSummary();
 
   // Mode toggle (Calendar vs List)
   const btnModeCalendar = document.getElementById('btnModeCalendar');
@@ -663,6 +713,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderCalendar() {
     calendarCurrentMonthLabel.innerText = `${monthNames[calCurrentMonth]} ${calCurrentYear}`;
     calendarMonthGrid.innerHTML = '';
+    const visiblePosts = getFilteredPosts();
 
     const firstDayIndex = new Date(calCurrentYear, calCurrentMonth, 1).getDay();
     const daysInMonth = new Date(calCurrentYear, calCurrentMonth + 1, 0).getDate();
@@ -689,13 +740,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const cell = document.createElement('div');
       cell.className = `calendar-cell ${isToday ? 'today' : ''}`;
       
-      let postsForDay = scheduledPosts.filter(p => p.date === dateStr);
-      if (currentFilter !== 'all') {
-        postsForDay = postsForDay.filter(p => {
-          if (currentFilter === 'reel') return p.type === 'reel' || p.type === 'test_reel';
-          return p.type === currentFilter;
-        });
-      }
+      const postsForDay = visiblePosts.filter(p => p.date === dateStr);
 
       let postsHtml = '';
       postsForDay.forEach(post => {
@@ -726,7 +771,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <i class="fa-brands fa-instagram schedule-card-network"></i>
               </div>
               <span class="schedule-card-type-pill ${typeClass}">${post.typeLabel}</span>
-              <div class="schedule-card-caption-preview">${post.caption}</div>
+              <div class="schedule-card-caption-preview">${escapeHtml(post.caption)}</div>
             </div>
           </div>
         `;
@@ -770,21 +815,113 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function getFilteredPosts() {
+    return scheduledPosts.filter(post => {
+      const statusKey = post.backendStatus || ({
+        Agendado: 'scheduled',
+        Publicando: 'processing',
+        Publicado: 'published',
+        Falhou: 'failed'
+      })[post.status] || 'scheduled';
+      if (!selectedStatusFilters.has(statusKey)) return false;
+      if (currentFilter === 'all') return true;
+      if (currentFilter === 'reel') return post.type === 'reel' || post.type === 'test_reel';
+      return post.type === currentFilter;
+    });
+  }
+
   // --- Render List View ---
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, character => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[character]);
+  }
+
+  function postLocalDateTime(post) {
+    const scheduledAt = post.scheduledAt ? new Date(post.scheduledAt) : null;
+    if (scheduledAt && !Number.isNaN(scheduledAt.getTime())) {
+      const date = [scheduledAt.getFullYear(), String(scheduledAt.getMonth() + 1).padStart(2, '0'), String(scheduledAt.getDate()).padStart(2, '0')].join('-');
+      const time = `${String(scheduledAt.getHours()).padStart(2, '0')}:${String(scheduledAt.getMinutes()).padStart(2, '0')}`;
+      return { date, time };
+    }
+    return { date: post.date, time: post.time };
+  }
+
+  function canEditPost(post) {
+    return (post.backendStatus || post.status) === 'scheduled' || post.status === 'Agendado';
+  }
+
+  function scheduleStatusKey(post) {
+    return post.backendStatus || ({
+      Agendado: 'scheduled',
+      Publicando: 'processing',
+      Publicado: 'published',
+      Falhou: 'failed'
+    })[post.status] || 'scheduled';
+  }
+
+  function scheduleStatusColor(post) {
+    const colors = {
+      scheduled: 'bg-blue-50 text-blue-700',
+      processing: 'bg-amber-50 text-amber-700',
+      published: 'bg-green-50 text-green-700',
+      failed: 'bg-red-50 text-red-700'
+    };
+    return colors[scheduleStatusKey(post)] || colors.scheduled;
+  }
+
+  async function saveScheduleEdit(id, date, time, caption) {
+    const post = scheduledPosts.find(item => item.id === id);
+    if (!post || !date || !time) {
+      showToast('Informe a data e o horário.', 'warning');
+      return false;
+    }
+    const scheduledAt = new Date(`${date}T${time}`);
+    if (Number.isNaN(scheduledAt.getTime()) || scheduledAt <= new Date()) {
+      showToast('Escolha uma data e um horário futuros.', 'warning');
+      return false;
+    }
+    if (caption.length > 2200) {
+      showToast('A legenda pode ter no máximo 2.200 caracteres.', 'warning');
+      return false;
+    }
+
+    try {
+      if (post.scheduledAt) {
+        const response = await fetch(`/api/schedules/${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ scheduled_at: scheduledAt.toISOString(), caption })
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.message || payload.error || 'Não foi possível salvar as alterações.');
+        const index = scheduledPosts.findIndex(item => item.id === id);
+        scheduledPosts[index] = normalizeBackendSchedule(payload.schedule);
+      } else {
+        post.date = date;
+        post.time = time;
+        post.caption = caption.trim();
+      }
+      quickEditPostId = null;
+      updateScheduleBadge();
+      renderListView();
+      renderCalendar();
+      showToast('Agendamento atualizado.', 'success');
+      return true;
+    } catch (error) {
+      showToast(error.message || 'Não foi possível salvar as alterações.', 'warning');
+      return false;
+    }
+  }
+
   function renderListView() {
     scheduleTableBody.innerHTML = '';
-    let filtered = scheduledPosts;
-    if (currentFilter !== 'all') {
-      filtered = filtered.filter(p => {
-        if (currentFilter === 'reel') return p.type === 'reel' || p.type === 'test_reel';
-        return p.type === currentFilter;
-      });
-    }
+    const filtered = getFilteredPosts();
 
     if (filtered.length === 0) {
       scheduleTableBody.innerHTML = `
         <tr>
-          <td colspan="7" class="text-center py-8 text-gray-400">Nenhuma publicação agendada com esse filtro.</td>
+          <td colspan="7" class="text-center py-8 text-gray-400">Nenhuma publicação corresponde aos filtros selecionados.</td>
         </tr>
       `;
       return;
@@ -798,6 +935,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const d = new Date(`${post.date}T${post.time}`);
       const formattedDate = d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' });
+      const isQuickEditing = quickEditPostId === post.id;
+      const localDateTime = postLocalDateTime(post);
 
       const tr = document.createElement('tr');
       tr.innerHTML = `
@@ -810,8 +949,15 @@ document.addEventListener('DOMContentLoaded', () => {
           <span class="schedule-card-type-pill ${typeClass} text-xs px-2 py-1">${post.typeLabel}</span>
         </td>
         <td>
-          <div class="font-semibold text-gray-900">${post.time}</div>
-          <div class="text-xs text-gray-500">${formattedDate}</div>
+          ${isQuickEditing ? `
+            <label class="sr-only" for="quickEditDate-${escapeHtml(post.id)}">Data</label>
+            <input id="quickEditDate-${escapeHtml(post.id)}" type="date" class="mb-1 w-full rounded border border-gray-300 px-2 py-1 text-xs" value="${escapeHtml(localDateTime.date)}">
+            <label class="sr-only" for="quickEditTime-${escapeHtml(post.id)}">Horário</label>
+            <input id="quickEditTime-${escapeHtml(post.id)}" type="time" class="w-full rounded border border-gray-300 px-2 py-1 text-xs" value="${escapeHtml(localDateTime.time)}">
+          ` : `
+            <div class="font-semibold text-gray-900">${escapeHtml(post.time)}</div>
+            <div class="text-xs text-gray-500">${escapeHtml(formattedDate)}</div>
+          `}
         </td>
         <td>
           <div class="flex items-center gap-1.5">
@@ -820,18 +966,23 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </td>
         <td>
-          <div class="text-xs text-gray-700 max-w-xs truncate">${post.caption}</div>
+          ${isQuickEditing ? `
+            <label class="sr-only" for="quickEditCaption-${escapeHtml(post.id)}">Legenda e hashtags</label>
+            <textarea id="quickEditCaption-${escapeHtml(post.id)}" rows="3" maxlength="2200" class="w-full min-w-48 rounded border border-gray-300 px-2 py-1 text-xs">${escapeHtml(post.caption)}</textarea>
+          ` : `<div class="text-xs text-gray-700 max-w-xs truncate">${escapeHtml(post.caption)}</div>`}
         </td>
         <td>
-          <span class="text-xs font-semibold px-2 py-1 rounded-full bg-blue-50 text-blue-700">${post.status}</span>
+          <span class="schedule-status-badge text-xs font-semibold px-2 py-1 rounded-full ${scheduleStatusColor(post)}">${escapeHtml(post.status)}</span>
         </td>
         <td style="text-align: right;">
-          <button type="button" class="btn-view-post px-2.5 py-1 text-xs font-semibold text-blue-600 hover:bg-blue-50 rounded" data-id="${post.id}">
-            Ver
-          </button>
-          <button type="button" class="btn-delete-post px-2.5 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 rounded ml-1" data-id="${post.id}">
-            <i class="fa-solid fa-trash-can"></i>
-          </button>
+          ${isQuickEditing ? `
+            <button type="button" class="btn-save-quick-edit px-2 py-1 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded" data-id="${escapeHtml(post.id)}">Salvar</button>
+            <button type="button" class="btn-cancel-quick-edit px-2 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded" data-id="${escapeHtml(post.id)}">Cancelar</button>
+          ` : `
+            <button type="button" class="btn-view-post px-2.5 py-1 text-xs font-semibold text-blue-600 hover:bg-blue-50 rounded" data-id="${escapeHtml(post.id)}">Ver</button>
+            ${canEditPost(post) ? `<button type="button" class="btn-quick-edit px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-100 rounded" data-id="${escapeHtml(post.id)}" title="Editar rápido" aria-label="Editar rápido"><i class="fa-solid fa-pen"></i></button>` : ''}
+            <button type="button" class="btn-delete-post px-2.5 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 rounded ml-1" data-id="${escapeHtml(post.id)}"><i class="fa-solid fa-trash-can"></i></button>
+          `}
         </td>
       `;
       scheduleTableBody.appendChild(tr);
@@ -842,6 +993,30 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.addEventListener('click', () => {
         const post = scheduledPosts.find(p => p.id === btn.dataset.id);
         if (post) openPostDetail(post);
+      });
+    });
+
+    document.querySelectorAll('.btn-quick-edit').forEach(btn => {
+      btn.addEventListener('click', () => {
+        quickEditPostId = btn.dataset.id;
+        renderListView();
+      });
+    });
+
+    document.querySelectorAll('.btn-cancel-quick-edit').forEach(btn => {
+      btn.addEventListener('click', () => {
+        quickEditPostId = null;
+        renderListView();
+      });
+    });
+
+    document.querySelectorAll('.btn-save-quick-edit').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const date = document.getElementById(`quickEditDate-${id}`).value;
+        const time = document.getElementById(`quickEditTime-${id}`).value;
+        const caption = document.getElementById(`quickEditCaption-${id}`).value;
+        await saveScheduleEdit(id, date, time, caption);
       });
     });
 
@@ -874,14 +1049,40 @@ document.addEventListener('DOMContentLoaded', () => {
   const modalDetailDateTime = document.getElementById('modalDetailDateTime');
   const modalDetailCaption = document.getElementById('modalDetailCaption');
   const btnEditFromModal = document.getElementById('btnEditFromModal');
+  const btnSavePostEdit = document.getElementById('btnSavePostEdit');
+  const btnCancelPostEdit = document.getElementById('btnCancelPostEdit');
+  const btnClosePostDetail = document.getElementById('btnClosePostDetail');
+  const modalEditDateTimeFields = document.getElementById('modalEditDateTimeFields');
+  const modalEditCaptionField = document.getElementById('modalEditCaptionField');
+  const modalEditDate = document.getElementById('modalEditDate');
+  const modalEditTime = document.getElementById('modalEditTime');
+  const modalEditCaption = document.getElementById('modalEditCaption');
   let selectedPostInModal = null;
+
+  function setPostDetailEditing(isEditing) {
+    const editable = isEditing && selectedPostInModal && canEditPost(selectedPostInModal);
+    modalDetailDateTime.classList.toggle('hidden', Boolean(editable));
+    modalDetailCaption.classList.toggle('hidden', Boolean(editable));
+    modalEditDateTimeFields.classList.toggle('hidden', !editable);
+    modalEditCaptionField.classList.toggle('hidden', !editable);
+    btnEditFromModal.classList.toggle('hidden', Boolean(editable) || !selectedPostInModal || !canEditPost(selectedPostInModal));
+    btnSavePostEdit.classList.toggle('hidden', !editable);
+    btnCancelPostEdit.classList.toggle('hidden', !editable);
+  }
 
   function openPostDetail(post) {
     selectedPostInModal = post;
+    const localDateTime = postLocalDateTime(post);
+    modalEditDate.value = localDateTime.date;
+    modalEditTime.value = localDateTime.time;
+    modalEditCaption.value = post.caption || '';
     modalDetailType.innerText = post.typeLabel;
     modalDetailStatus.innerText = post.status;
-    modalDetailDateTime.innerText = `${post.date} às ${post.time}`;
+    modalDetailStatus.className = `schedule-status-badge text-xs px-2 py-0.5 rounded-full font-semibold ${scheduleStatusColor(post)}`;
+    const displayDate = new Date(`${localDateTime.date}T${localDateTime.time}`);
+    modalDetailDateTime.innerText = `${displayDate.toLocaleDateString('pt-BR')} às ${localDateTime.time}`;
     modalDetailCaption.innerText = post.caption || '(Sem legenda)';
+    setPostDetailEditing(false);
 
     if (post.isVideo) {
       modalDetailImage.classList.add('hidden');
@@ -899,14 +1100,30 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   btnEditFromModal.addEventListener('click', () => {
-    if (selectedPostInModal) {
-      editor.innerText = selectedPostInModal.caption;
-      updateEditorState();
-      postDetailModal.classList.remove('active');
-      switchTab('planner');
-      showToast('Publicação carregada no editor para edição.', 'info');
-    }
+    if (!selectedPostInModal || !canEditPost(selectedPostInModal)) return;
+    const localDateTime = postLocalDateTime(selectedPostInModal);
+    modalEditDate.value = localDateTime.date;
+    modalEditTime.value = localDateTime.time;
+    modalEditCaption.value = selectedPostInModal.caption || '';
+    setPostDetailEditing(true);
   });
+
+  btnSavePostEdit.addEventListener('click', async () => {
+    if (!selectedPostInModal) return;
+    const saved = await saveScheduleEdit(
+      selectedPostInModal.id,
+      modalEditDate.value,
+      modalEditTime.value,
+      modalEditCaption.value
+    );
+    if (!saved) return;
+    selectedPostInModal = scheduledPosts.find(post => post.id === selectedPostInModal.id) || null;
+    if (selectedPostInModal) openPostDetail(selectedPostInModal);
+    else postDetailModal.classList.remove('active');
+  });
+
+  btnCancelPostEdit.addEventListener('click', () => setPostDetailEditing(false));
+  btnClosePostDetail.addEventListener('click', () => postDetailModal.classList.remove('active'));
 
   // --- Schedule Button Action ---
   async function submitStoryToBackend() {
@@ -1005,6 +1222,11 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    if (!currentMedia) {
+      showToast('Selecione uma imagem ou vídeo antes de agendar.', 'warning');
+      return;
+    }
+
     const scheduledDate = document.getElementById('scheduledDateInput').value || '2026-09-22';
     const scheduledTime = document.getElementById('scheduledTimeInput').value || '08:49';
     const modeText = currentNetworkModeText.innerText.trim();
@@ -1014,8 +1236,8 @@ document.addEventListener('DOMContentLoaded', () => {
       time: scheduledTime,
       type: currentMode === 'test_reel' ? 'test_reel' : currentMode,
       typeLabel: modeText,
-      media: currentMedia ? currentMedia.url : 'assets/CLIP6.mp4',
-      isVideo: currentMedia ? currentMedia.isVideo : true,
+      media: currentMedia.url,
+      isVideo: currentMedia.isVideo,
       caption: editor.innerText.trim() || 'Novo post agendado',
       status: selectedPublishAction === 'publish_now' ? 'Publicado' : 'Agendado'
     });

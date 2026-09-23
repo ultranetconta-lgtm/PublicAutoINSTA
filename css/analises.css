@@ -1,0 +1,939 @@
+/* ==========================================================================
+   Apple Minimalist Analytics View Styles - Metricool Planner
+   ========================================================================== */
+
+/* Apple Design System Variables */
+:root {
+  --apple-font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "SF Pro", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --apple-bg: #fbfbfd;
+  --apple-subtle-bg: #f5f5f7;
+  --apple-card-bg: #ffffff;
+  --apple-card-border: rgba(0, 0, 0, 0.06);
+  --apple-card-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.02);
+  --apple-card-hover-shadow: 0 12px 30px -4px rgba(0, 0, 0, 0.08), 0 4px 10px rgba(0, 0, 0, 0.03);
+
+  --apple-text-primary: #1d1d1f;
+  --apple-text-secondary: #86868b;
+  --apple-text-tertiary: #aeaeb2;
+
+  --apple-blue: #0071e3;
+  --apple-blue-hover: #0077ed;
+  --apple-blue-light: rgba(0, 113, 227, 0.08);
+  --apple-blue-gradient: linear-gradient(180deg, rgba(0, 113, 227, 0.22) 0%, rgba(0, 113, 227, 0.01) 100%);
+
+  --apple-green: #34c759;
+  --apple-green-light: rgba(52, 199, 89, 0.12);
+  --apple-red: #ff3b30;
+  --apple-red-light: rgba(255, 59, 48, 0.12);
+  --apple-purple: #5856d6;
+  --apple-purple-light: rgba(88, 86, 214, 0.12);
+  --apple-amber: #ff9500;
+}
+
+/* Analytics Container Layout */
+.analises-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: calc(100vh - 65px);
+  background-color: var(--apple-bg);
+  font-family: var(--apple-font);
+  color: var(--apple-text-primary);
+  padding: 24px 32px 48px;
+  overflow-x: hidden;
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* --- Apple Header Toolbar --- */
+.analises-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.analises-header-title-group h2 {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: var(--apple-text-primary);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.analises-header-title-group p {
+  font-size: 13px;
+  color: var(--apple-text-secondary);
+  margin-top: 3px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.analises-account-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.04);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--apple-text-primary);
+}
+
+.analises-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--apple-green);
+  box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.25);
+  animation: applePulse 2s infinite ease-in-out;
+}
+
+@keyframes applePulse {
+  0%, 100% { transform: scale(0.95); opacity: 0.8; }
+  70% { transform: scale(1); opacity: 1; }
+}
+
+/* Apple Segmented Control (Tabs de Período) */
+.apple-segmented-control {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(118, 118, 128, 0.12);
+  padding: 3px;
+  border-radius: 9999px;
+  position: relative;
+  user-select: none;
+}
+
+.apple-segment-btn {
+  border: none;
+  background: transparent;
+  color: var(--apple-text-secondary);
+  font-family: var(--apple-font);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 6px 18px;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+  position: relative;
+  z-index: 1;
+}
+
+.apple-segment-btn:hover {
+  color: var(--apple-text-primary);
+}
+
+.apple-segment-btn.active {
+  background: #ffffff;
+  color: var(--apple-text-primary);
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.apple-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid var(--apple-card-border);
+  background: #ffffff;
+  color: var(--apple-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.apple-icon-btn:hover {
+  background: var(--apple-subtle-bg);
+  color: var(--apple-text-primary);
+  transform: rotate(45deg);
+}
+
+/* --- Apple KPI Metrics Cards Grid --- */
+.analises-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+@media (max-width: 1100px) {
+  .analises-kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .analises-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.apple-metric-card {
+  background: var(--apple-card-bg);
+  border-radius: 18px;
+  border: 1px solid var(--apple-card-border);
+  padding: 20px;
+  box-shadow: var(--apple-card-shadow);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.apple-metric-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--apple-card-hover-shadow);
+}
+
+.apple-metric-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.apple-metric-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--apple-text-secondary);
+  letter-spacing: -0.01em;
+}
+
+.apple-metric-icon-wrap {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.apple-icon-blue { background: var(--apple-blue-light); color: var(--apple-blue); }
+.apple-icon-purple { background: var(--apple-purple-light); color: var(--apple-purple); }
+.apple-icon-green { background: var(--apple-green-light); color: var(--apple-green); }
+.apple-icon-amber { background: rgba(255, 149, 0, 0.12); color: var(--apple-amber); }
+
+.apple-metric-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.apple-metric-value {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  color: var(--apple-text-primary);
+  line-height: 1.1;
+}
+
+.apple-trend-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.apple-trend-badge[hidden] {
+  display: none;
+}
+
+.apple-trend-positive {
+  background: var(--apple-green-light);
+  color: var(--apple-green);
+}
+
+.apple-trend-negative {
+  background: var(--apple-red-light);
+  color: var(--apple-red);
+}
+
+.apple-metric-footer {
+  font-size: 12px;
+  color: var(--apple-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.apple-metric-footer--stacked {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.apple-metric-subvalue {
+  color: #86868b;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.apple-sub-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.apple-tag-gain {
+  color: var(--apple-green);
+  background: var(--apple-green-light);
+  padding: 1px 6px;
+  border-radius: 9999px;
+}
+
+.apple-tag-loss {
+  color: var(--apple-text-secondary);
+  background: rgba(0, 0, 0, 0.05);
+  padding: 1px 6px;
+  border-radius: 9999px;
+}
+
+/* --- Apple Main Chart Card --- */
+.apple-chart-card {
+  background: var(--apple-card-bg);
+  border-radius: 20px;
+  border: 1px solid var(--apple-card-border);
+  box-shadow: var(--apple-card-shadow);
+  padding: 24px 28px;
+  margin-bottom: 24px;
+  position: relative;
+}
+
+.apple-chart-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.apple-chart-title-group h3 {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--apple-text-primary);
+  margin: 0;
+}
+
+.apple-chart-title-group p {
+  font-size: 12.5px;
+  color: var(--apple-text-secondary);
+  margin-top: 3px;
+}
+
+.apple-chart-legend {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--apple-text-secondary);
+  font-weight: 500;
+}
+
+.apple-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.apple-legend-toggle {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--apple-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.apple-legend-toggle:hover {
+  color: var(--apple-text-primary);
+}
+
+.apple-legend-toggle[aria-pressed="false"] {
+  opacity: 0.5;
+}
+
+.apple-average-line-indicator {
+  width: 18px;
+  height: 0;
+  border-top: 2px dashed #ff9500;
+}
+
+.apple-legend-dot-views {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--apple-blue);
+  box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.2);
+}
+
+.apple-legend-badge-reels {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: #1d1d1f;
+  color: #ffffff;
+  font-size: 8px;
+}
+
+/* --- Chart Canvas & SVG Container --- */
+.apple-chart-wrapper {
+  position: relative;
+  width: 100%;
+  height: 380px;
+  margin-top: 10px;
+  overflow-x: clip;
+}
+
+/* Lateral Y-Axis (Barra Lateral com os Valores) */
+.apple-chart-y-axis {
+  position: absolute;
+  top: 0;
+  bottom: 34px;
+  left: 0;
+  width: 50px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding-right: 12px;
+  user-select: none;
+  pointer-events: none;
+}
+
+.apple-chart-y-tick {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--apple-text-secondary);
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+
+/* Main SVG Area */
+.apple-chart-svg-container {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 54px;
+}
+
+.apple-chart-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* Grid Lines */
+.apple-grid-line {
+  stroke: rgba(0, 0, 0, 0.05);
+  stroke-dasharray: 4 4;
+  stroke-width: 1;
+}
+
+.apple-grid-baseline {
+  stroke: rgba(0, 0, 0, 0.1);
+  stroke-width: 1;
+}
+
+/* Chart Curve Path */
+.apple-chart-line {
+  fill: none;
+  stroke: var(--apple-blue);
+  stroke-width: 2.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.apple-chart-average-line {
+  stroke: #ff9500;
+  stroke-width: 2;
+  stroke-dasharray: 7 5;
+  pointer-events: none;
+}
+
+.apple-chart-area {
+  fill: url(#appleViewsGradient);
+}
+
+/* Data point circles */
+.apple-data-point {
+  fill: #ffffff;
+  stroke: var(--apple-blue);
+  stroke-width: 2;
+  r: 4;
+  transition: r 0.15s ease, fill 0.15s ease, stroke 0.15s ease;
+  cursor: pointer;
+}
+
+.apple-data-point:hover {
+  r: 6;
+  fill: var(--apple-blue);
+  stroke: #ffffff;
+  stroke-width: 2.5;
+}
+
+/* Interactive Crosshair & Cursor Line */
+.apple-crosshair-line {
+  stroke: rgba(0, 113, 227, 0.4);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+/* Horizontal X-Axis (Datas) */
+.apple-chart-x-axis {
+  position: absolute;
+  left: 54px;
+  right: 0;
+  bottom: 0;
+  height: 28px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+  pointer-events: none;
+}
+
+.apple-chart-x-tick {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--apple-text-secondary);
+  letter-spacing: -0.01em;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   COMPACT REEL COVERS ON THE CHART
+   ========================================================================== */
+.apple-reel-pin-group {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 34px;
+  left: 54px;
+  pointer-events: none;
+}
+
+/* The compact Reel card container */
+.apple-compact-reel-marker {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 10;
+  transition: transform 0.18s ease;
+}
+
+/* Vertical dashed connection line from reel marker down to data point */
+.apple-reel-stem-line {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 1.5px;
+  height: 18px;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--apple-blue),
+    var(--apple-blue) 3px,
+    transparent 3px,
+    transparent 6px
+  );
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+/* The Compact Reel Cover Thumbnail Box (9:16 compact ratio) */
+.apple-compact-reel-card {
+  width: 32px;
+  height: 48px;
+  border-radius: 8px;
+  background: #111113;
+  border: 2px solid #ffffff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22), 0 1px 4px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.18s ease;
+}
+
+.apple-compact-reel-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Mini play icon pill */
+.apple-compact-reel-play {
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  /* Solid translucent fill avoids a backdrop-filter layer on every marker. */
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 6px;
+}
+
+/* Count badge if multiple reels on same day */
+.apple-reel-multi-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  background: var(--apple-blue);
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid #ffffff;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+/* Hover effect on compact reel marker */
+.apple-compact-reel-marker:hover {
+  transform: translate(-50%, -106%) scale(1.15);
+  z-index: 50;
+}
+
+.apple-compact-reel-marker:hover .apple-compact-reel-card {
+  border-color: var(--apple-blue);
+  box-shadow: 0 10px 24px rgba(0, 113, 227, 0.32), 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* ==========================================================================
+   APPLE FLOATING POPOVER & TOOLTIP
+   ========================================================================== */
+.apple-chart-tooltip {
+  position: absolute;
+  z-index: 100;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  padding: 8px 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.04);
+  font-size: 12px;
+  color: var(--apple-text-primary);
+  display: none;
+  transform: translate(-50%, -120%);
+  white-space: nowrap;
+  transition: opacity 0.15s ease;
+}
+
+.apple-chart-tooltip.active {
+  display: block;
+}
+
+.apple-chart-tooltip-date {
+  font-size: 11px;
+  color: var(--apple-text-secondary);
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.apple-chart-tooltip-views {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--apple-blue);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Rich Reel Detail Popover */
+.apple-reel-popover {
+  position: fixed;
+  z-index: 999;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.09);
+  border-radius: 18px;
+  box-shadow: 0 20px 48px -6px rgba(0, 0, 0, 0.2), 0 8px 16px rgba(0, 0, 0, 0.05);
+  width: 290px;
+  padding: 16px;
+  display: none;
+  animation: appleFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.apple-reel-popover.active {
+  display: block;
+}
+
+@keyframes appleFadeIn {
+  from { opacity: 0; transform: scale(0.96) translateY(6px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.apple-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.apple-popover-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--apple-purple);
+  background: var(--apple-purple-light);
+  padding: 3px 8px;
+  border-radius: 9999px;
+}
+
+.apple-popover-close {
+  background: transparent;
+  border: none;
+  color: var(--apple-text-tertiary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px;
+}
+
+.apple-popover-close:hover {
+  color: var(--apple-text-primary);
+}
+
+.apple-popover-body {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.apple-popover-thumb {
+  width: 70px;
+  height: 105px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #111;
+  flex-shrink: 0;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.apple-popover-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.apple-popover-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  flex: 1;
+  min-width: 0;
+}
+
+.apple-popover-caption {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--apple-text-primary);
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.apple-popover-date {
+  font-size: 11px;
+  color: var(--apple-text-secondary);
+  margin-top: 4px;
+}
+
+.apple-popover-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  background: var(--apple-subtle-bg);
+  border-radius: 10px;
+  padding: 8px 10px;
+  text-align: center;
+}
+
+.apple-popover-stat-item .stat-num {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--apple-text-primary);
+}
+
+.apple-popover-stat-item .stat-lbl {
+  font-size: 9.5px;
+  color: var(--apple-text-secondary);
+  font-weight: 500;
+}
+
+.apple-popover-action {
+  margin-top: 10px;
+}
+
+.apple-popover-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 12px;
+  border-radius: 8px;
+  background: var(--apple-blue);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.2s ease;
+}
+
+.apple-popover-btn:hover {
+  background: var(--apple-blue-hover);
+}
+
+/* ==========================================================================
+   RECENT REELS LIST / CAROUSEL AT BOTTOM
+   ========================================================================== */
+.analises-reels-section {
+  background: var(--apple-card-bg);
+  border-radius: 20px;
+  border: 1px solid var(--apple-card-border);
+  box-shadow: var(--apple-card-shadow);
+  padding: 24px 28px;
+}
+
+.analises-reels-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.analises-reels-header h3 {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--apple-text-primary);
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.analises-reels-header span {
+  font-size: 12.5px;
+  color: var(--apple-text-secondary);
+}
+
+.apple-reels-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+.apple-reel-item-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid var(--apple-card-border);
+  background: #ffffff;
+  transition: transform 0.18s ease, background-color 0.18s ease, border-color 0.18s ease;
+  cursor: pointer;
+}
+
+.apple-reel-item-card:hover {
+  background: var(--apple-subtle-bg);
+  transform: translateY(-2px);
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+.apple-reel-item-thumb {
+  width: 44px;
+  height: 64px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #111;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.apple-reel-item-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.apple-reel-item-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.apple-reel-item-caption {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--apple-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.apple-reel-item-date {
+  font-size: 11px;
+  color: var(--apple-text-secondary);
+  margin-top: 2px;
+}
+
+.apple-reel-item-metrics {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--apple-text-secondary);
+}
+
+.apple-reel-item-metrics span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}

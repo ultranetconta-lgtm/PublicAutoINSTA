@@ -13,6 +13,10 @@ from urllib.request import Request, urlopen
 class MetaAPIError(RuntimeError):
     """An error returned by Meta or by the media publishing transport."""
 
+    def __init__(self, message: str, *, container_id: str | None = None) -> None:
+        super().__init__(message)
+        self.container_id = container_id
+
 
 RequestFn = Callable[..., dict]
 
@@ -26,7 +30,7 @@ class StoryService:
         base_url: str = "https://graph.instagram.com",
         api_version: str = "v25.0",
         request_fn: RequestFn | None = None,
-        poll_interval_seconds: float = 1.0,
+        poll_interval_seconds: float = 20.0,
     ) -> None:
         if not access_token:
             raise ValueError("Instagram access token is required")
@@ -69,12 +73,18 @@ class StoryService:
             if isinstance(exc, HTTPError):
                 try:
                     body = json.loads(exc.read().decode("utf-8"))
-                    detail = body.get("error", {}).get("message", detail)
+                    error = body.get("error") if isinstance(body, dict) else None
+                    if isinstance(error, dict):
+                        parts = [str(error.get("message") or detail)]
+                        for label, key in (("code", "code"), ("subcode", "error_subcode"), ("trace", "fbtrace_id")):
+                            if error.get(key) is not None:
+                                parts.append(f"{label}={error[key]}")
+                        detail = "; ".join(parts)
                 except (OSError, UnicodeDecodeError, json.JSONDecodeError):
                     pass
             elif isinstance(exc, URLError):
                 detail = f"Meta connection failed: {exc.reason}"
-            raise MetaAPIError(detail) from exc
+            raise MetaAPIError(detail.replace(self._access_token, "[redacted]")) from exc
 
     def create_container(self, media_url: str, media_kind: str) -> str:
         if media_kind not in {"image", "video"}:
@@ -131,26 +141,37 @@ class StoryService:
             caption,
             graduation_strategy=graduation_strategy,
         )
-        self.wait_until_ready(container_id)
-        media_id = self.publish_container(container_id)
+        try:
+            self.wait_until_ready(container_id)
+            media_id = self.publish_container(container_id)
+        except MetaAPIError as exc:
+            exc.container_id = container_id
+            raise
         return {"id": media_id, "container_id": container_id}
 
-    def wait_until_ready(self, container_id: str, timeout_seconds: float = 60.0) -> str:
+    def wait_until_ready(self, container_id: str, timeout_seconds: float = 300.0) -> str:
         deadline = time.monotonic() + timeout_seconds
         last_status = "IN_PROGRESS"
-        while time.monotonic() <= deadline:
+        while True:
             response = self._request_fn(
                 "GET",
-                f"{self._container_endpoint(container_id)}?fields=status_code",
+                f"{self._container_endpoint(container_id)}?fields=status_code,status",
                 headers={"Authorization": f"Bearer {self._access_token}"},
             )
             last_status = str(response.get("status_code", "")).upper()
             if last_status == "FINISHED":
                 return last_status
             if last_status in {"ERROR", "EXPIRED"}:
-                raise MetaAPIError(f"Story container status: {last_status}")
-            time.sleep(self.poll_interval_seconds)
-        raise MetaAPIError(f"Story container did not finish: {last_status}")
+                detail = str(response.get("status") or "").strip().replace(self._access_token, "[redacted]")
+                message = f"Meta container status: {last_status}"
+                if detail:
+                    message += f" — {detail}"
+                raise MetaAPIError(message, container_id=container_id)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(self.poll_interval_seconds, remaining))
+        raise MetaAPIError(f"Meta container did not finish: {last_status}", container_id=container_id)
 
     def publish_container(self, container_id: str) -> str:
         response = self._request_fn(
@@ -166,6 +187,92 @@ class StoryService:
 
     def publish_story(self, media_url: str, media_kind: str) -> dict:
         container_id = self.create_container(media_url, media_kind)
-        self.wait_until_ready(container_id)
-        media_id = self.publish_container(container_id)
+        try:
+            self.wait_until_ready(container_id)
+            media_id = self.publish_container(container_id)
+        except MetaAPIError as exc:
+            exc.container_id = container_id
+            raise
         return {"id": media_id, "container_id": container_id}
+
+    def get_profile(self) -> dict:
+        url = f"{self.base_url}/{self.api_version}/{self.instagram_user_id}?fields=id,username,name,profile_picture_url,followers_count,media_count"
+        return self._request_fn("GET", url, headers={"Authorization": f"Bearer {self._access_token}"})
+
+    def get_recent_media(self, limit: int = 100) -> list[dict]:
+        url = f"{self._endpoint('media')}?fields=id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count&limit={limit}"
+        response = self._request_fn("GET", url, headers={"Authorization": f"Bearer {self._access_token}"})
+        return response.get("data", [])
+
+    def get_account_insights(
+        self,
+        metrics: list[str],
+        *,
+        since: int,
+        until: int,
+        metric_type: str = "total_value",
+    ) -> dict[str, int]:
+        """Read a date-bounded account insight total without exposing the token."""
+        supported_metrics = {
+            "views", "reach", "accounts_engaged", "total_interactions", "likes",
+            "comments", "shares", "saves", "replies", "follows_and_unfollows",
+            "profile_links_taps",
+        }
+        if not metrics or any(metric not in supported_metrics for metric in metrics):
+            raise ValueError("unsupported Instagram account insight metric")
+        if metric_type != "total_value":
+            raise ValueError("unsupported Instagram account insight type")
+        if until <= since:
+            raise ValueError("Instagram insight end must be after its start")
+
+        query = urlencode({
+            "metric": ",".join(metrics),
+            "period": "day",
+            "metric_type": metric_type,
+            "since": since,
+            "until": until,
+        })
+        response = self._request_fn(
+            "GET",
+            f"{self._endpoint('insights')}?{query}",
+            headers={"Authorization": f"Bearer {self._access_token}"},
+        )
+        rows = response.get("data")
+        if not isinstance(rows, list):
+            raise MetaAPIError("Meta returned an invalid account insights response")
+
+        results: dict[str, int] = {}
+        for row in rows:
+            if not isinstance(row, dict) or row.get("name") not in metrics:
+                continue
+            value = (row.get("total_value") or {}).get("value")
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                results[row["name"]] = int(value)
+
+        missing = [metric for metric in metrics if metric not in results]
+        if missing:
+            raise MetaAPIError(f"Meta did not return account insight metric: {', '.join(missing)}")
+        return results
+
+    def get_media_views(self, media_id: str) -> int:
+        """Read the current lifetime views for one media item."""
+        query = urlencode({"metric": "views"})
+        response = self._request_fn(
+            "GET",
+            f"{self._container_endpoint(media_id)}/insights?{query}",
+            headers={"Authorization": f"Bearer {self._access_token}"},
+        )
+        rows = response.get("data")
+        if not isinstance(rows, list):
+            raise MetaAPIError("Meta returned an invalid media insights response")
+        row = next((item for item in rows if isinstance(item, dict) and item.get("name") == "views"), None)
+        if not row:
+            raise MetaAPIError("Meta did not return media views")
+        value = (row.get("total_value") or {}).get("value")
+        if value is None:
+            values = row.get("values")
+            if isinstance(values, list) and values and isinstance(values[0], dict):
+                value = values[0].get("value")
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise MetaAPIError("Meta returned an invalid media views value")
+        return int(value)

@@ -1,9 +1,65 @@
 import unittest
+from io import BytesIO
+from unittest.mock import patch
+from urllib.error import HTTPError
 
-from backend.story_service import StoryService
+from backend.story_service import MetaAPIError, StoryService
 
 
 class StoryServiceTests(unittest.TestCase):
+    def test_reel_processing_can_finish_after_more_than_one_minute(self):
+        clock = [0.0]
+        checks = []
+
+        def request(method, url, *, data=None, headers=None):
+            checks.append(clock[0])
+            return {"status_code": "FINISHED" if len(checks) == 7 else "IN_PROGRESS"}
+
+        service = StoryService("token", "ig-user", request_fn=request, poll_interval_seconds=20)
+        with patch("backend.story_service.time.monotonic", side_effect=lambda: clock[0]):
+            with patch("backend.story_service.time.sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds + 0.001)):
+                self.assertEqual(service.wait_until_ready("slow-container"), "FINISHED")
+
+        self.assertEqual(len(checks), 7)
+        self.assertGreater(checks[-1], 60)
+
+    def test_http_error_keeps_meta_subcode_and_trace_without_token(self):
+        body = (
+            b'{"error":{"message":"Upload rejected for token secret-token",'
+            b'"code":400,"error_subcode":2207052,"fbtrace_id":"trace-123"}}'
+        )
+        response_error = HTTPError("https://graph.instagram.com/v26.0/media", 400, "Bad Request", {}, BytesIO(body))
+        service = StoryService("secret-token", "ig-user")
+
+        with patch("backend.story_service.urlopen", side_effect=response_error):
+            with self.assertRaises(MetaAPIError) as captured:
+                service._request_json("POST", service._endpoint("media"), data={"media_type": "REELS"})
+
+        message = str(captured.exception)
+        self.assertIn("2207052", message)
+        self.assertIn("trace-123", message)
+        self.assertNotIn("secret-token", message)
+
+    def test_failed_reel_exposes_container_id_and_meta_status_detail(self):
+        calls = []
+
+        def request(method, url, *, data=None, headers=None):
+            calls.append((method, url))
+            if method == "POST" and url.endswith("/media"):
+                return {"id": "reel-container-42"}
+            if method == "GET":
+                return {"status_code": "ERROR", "status": "Error: Media could not be fetched."}
+            self.fail("media_publish must not be called for a failed container")
+
+        service = StoryService("token", "ig-user", request_fn=request)
+        with self.assertRaises(MetaAPIError) as captured:
+            service.publish_reel("https://public.example/reel.mp4", "Teste")
+
+        self.assertEqual(captured.exception.container_id, "reel-container-42")
+        self.assertIn("Media could not be fetched", str(captured.exception))
+        self.assertIn("fields=status_code,status", calls[1][1])
+        self.assertNotIn("token", str(captured.exception))
+
     def test_trial_reel_container_uses_reels_and_manual_trial_params(self):
         calls = []
 
