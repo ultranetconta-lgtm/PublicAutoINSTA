@@ -543,7 +543,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function updateScheduleBadge() {
     if (agendamentosCountBadge) {
-      agendamentosCountBadge.innerText = scheduledPosts.length;
+      agendamentosCountBadge.innerText = scheduledPosts.filter(post => scheduleStatusKey(post) === 'scheduled').length;
     }
   }
 
