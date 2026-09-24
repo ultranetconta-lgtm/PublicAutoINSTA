@@ -17,10 +17,12 @@
     chartMouseFrame: null,
     chartLastPointIndex: -1,
     chartTooltipHalfWidth: 85,
+    loadSequence: 0,
 
     init() {
       if (this.initialized) {
-        this.render();
+        if (this.currentData) this.render();
+        else this.loadData();
         return;
       }
       this.bindEvents();
@@ -81,6 +83,12 @@
         }
       });
 
+      document.addEventListener('instagram-account-changed', () => {
+        this.currentData = null;
+        this.renderUnavailable('Consultando os Insights atuais da Meta…');
+        if (document.getElementById('viewAnalises')?.classList.contains('active')) this.loadData();
+      });
+
       // Window resize re-renders the responsive chart
       let resizeTimer = null;
       window.addEventListener('resize', () => {
@@ -118,6 +126,14 @@
     },
 
     async loadData(forceRefresh = false) {
+      const accountId = window.getActiveInstagramAccountId?.() || '';
+      const requestId = ++this.loadSequence;
+      if (!accountId) {
+        this.isLoading = false;
+        this.currentData = null;
+        this.renderUnavailable('Conecte uma conta do Instagram para consultar os Insights.');
+        return;
+      }
       this.isLoading = true;
       const viewContainer = document.getElementById('viewAnalises');
       this.currentData = null;
@@ -128,23 +144,26 @@
       }
 
       try {
-        const refreshParam = forceRefresh ? '&refresh=1' : '';
-        const response = await fetch(`/api/analytics?period=${this.currentPeriod}${refreshParam}`, { cache: 'no-store' });
+        const params = new URLSearchParams({ account_id: accountId, period: this.currentPeriod });
+        if (forceRefresh) params.set('refresh', '1');
+        const response = await fetch(`/api/analytics?${params.toString()}`, { cache: 'no-store' });
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
         const data = await response.json();
+        if (requestId !== this.loadSequence || accountId !== window.getActiveInstagramAccountId?.()) return;
         if (!data || data.ok !== true) {
           throw new Error('Meta analytics unavailable');
         }
         this.currentData = data;
         this.render();
       } catch (_) {
+        if (requestId !== this.loadSequence || accountId !== window.getActiveInstagramAccountId?.()) return;
         this.currentData = null;
         this.renderUnavailable('Não foi possível consultar os Insights atuais da Meta. Tente atualizar novamente.');
       } finally {
-        this.isLoading = false;
-        if (viewContainer) {
+        if (requestId === this.loadSequence) this.isLoading = false;
+        if (requestId === this.loadSequence && viewContainer) {
           viewContainer.style.opacity = '1';
           viewContainer.style.pointerEvents = 'auto';
         }
@@ -262,9 +281,11 @@
       if (follows24) {
         const gained = metrics.followers_gained_24h;
         const lost = metrics.followers_lost_24h;
-        follows24.textContent = gained !== null && gained !== undefined && lost !== null && lost !== undefined
-          ? `Últimas 24 horas: +${Number(gained).toLocaleString('pt-BR')} ganhos · −${Number(lost).toLocaleString('pt-BR')} perdidos`
-          : 'Últimas 24 horas: a API não separa ganhos e perdas';
+        const gainedAvailable = gained !== null && gained !== undefined && Number.isFinite(Number(gained));
+        const lostAvailable = lost !== null && lost !== undefined && Number.isFinite(Number(lost));
+        follows24.textContent = gainedAvailable || lostAvailable
+          ? `Últimas 24 horas: ${gainedAvailable ? `+${Number(gained).toLocaleString('pt-BR')} ganhos` : 'ganhos indisponíveis'} · ${lostAvailable ? `−${Number(lost).toLocaleString('pt-BR')} perdidos` : 'perdas indisponíveis'}`
+          : 'Últimas 24 horas: a Meta ainda não retornou ganhos/perdas';
       }
       if (reels24) {
         const count24 = Number(metrics.reels_count_24h);
@@ -684,13 +705,42 @@
 
       if (countHeader) countHeader.innerText = `${reels.length} Reels publicados`;
 
-      grid.innerHTML = reels.slice(0, 8).map(reel => {
-        const views = Number.isFinite(Number(reel.views))
-          ? Number(reel.views).toLocaleString('pt-BR')
+      const reelViews = reels
+        .map(reel => reel.views !== undefined && reel.views !== null && reel.views !== '' ? Number(reel.views) : NaN)
+        .filter(views => Number.isFinite(views) && views >= 0)
+        .sort((a, b) => a - b);
+      const middle = Math.floor(reelViews.length / 2);
+      const medianViews = reelViews.length === 0
+        ? null
+        : reelViews.length % 2 === 0
+          ? (reelViews[middle - 1] + reelViews[middle]) / 2
+          : reelViews[middle];
+
+      grid.innerHTML = reels.map(reel => {
+        const viewCount = reel.views !== undefined && reel.views !== null && reel.views !== '' && Number.isFinite(Number(reel.views))
+          ? Number(reel.views)
           : null;
-        const likes = Number.isFinite(Number(reel.like_count))
+        const views = viewCount !== null ? viewCount.toLocaleString('pt-BR') : null;
+        const likes = reel.like_count !== undefined && reel.like_count !== null && reel.like_count !== '' && Number.isFinite(Number(reel.like_count))
           ? Number(reel.like_count).toLocaleString('pt-BR')
           : null;
+        const likeCount = reel.like_count !== undefined && reel.like_count !== null && reel.like_count !== '' && Number.isFinite(Number(reel.like_count))
+          ? Number(reel.like_count)
+          : null;
+        const comments = reel.comments_count !== undefined && reel.comments_count !== null && reel.comments_count !== '' && Number.isFinite(Number(reel.comments_count))
+          ? Number(reel.comments_count).toLocaleString('pt-BR')
+          : null;
+        const likeRate = viewCount > 0 && likeCount !== null
+          ? `${(likeCount / viewCount * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% das visualizações viraram curtidas`
+          : null;
+        let performance = { label: 'Sem comparação', className: 'is-unavailable', title: 'Não há dados suficientes de visualizações para comparar este Reel.' };
+        if (viewCount !== null && medianViews !== null && reelViews.length >= 2) {
+          performance = viewCount > medianViews
+            ? { label: 'Bom desempenho', className: 'is-good', title: `Acima da mediana de ${medianViews.toLocaleString('pt-BR')} visualizações neste período.` }
+            : viewCount < medianViews
+              ? { label: 'Abaixo da mediana', className: 'is-low', title: `Abaixo da mediana de ${medianViews.toLocaleString('pt-BR')} visualizações neste período.` }
+              : { label: 'Na mediana', className: 'is-average', title: `Na mediana de ${medianViews.toLocaleString('pt-BR')} visualizações neste período.` };
+        }
         let formattedDate = 'Recentemente';
         if (reel.timestamp) {
           try {
@@ -709,10 +759,13 @@
                 ${this.escapeHtml(reel.caption || 'Reel')}
               </div>
               <div class="apple-reel-item-date">${formattedDate}</div>
+              <span class="apple-reel-performance ${performance.className}" title="${performance.title}">${performance.label}</span>
               <div class="apple-reel-item-metrics">
                 ${views !== null ? `<span><i class="fa-solid fa-eye text-[10px] text-blue-500"></i> ${views}</span>` : ''}
                 ${likes !== null ? `<span><i class="fa-solid fa-heart text-[10px] text-red-500"></i> ${likes}</span>` : ''}
+                ${comments !== null ? `<span><i class="fa-regular fa-comment text-[10px]"></i> ${comments}</span>` : ''}
               </div>
+              ${likeRate ? `<div class="apple-reel-like-rate">${likeRate}</div>` : ''}
             </div>
           </div>
         `;

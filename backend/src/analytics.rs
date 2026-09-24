@@ -16,6 +16,7 @@ const MONTHS_PT: [&str; 12] = [
 
 pub async fn build_analytics(
     state: &AppState,
+    account_id: &str,
     requested_period: &str,
     force_refresh: bool,
 ) -> Result<Value, MetaError> {
@@ -26,8 +27,8 @@ pub async fn build_analytics(
         _ => "30d",
     };
     let service = state
-        .service
-        .as_ref()
+        .service_for_account(account_id)
+        .await
         .ok_or_else(|| MetaError::new("Instagram account insights are not configured"))?;
     let today = Utc::now().with_timezone(&Sao_Paulo).date_naive();
     let days_count = match period {
@@ -40,12 +41,23 @@ pub async fn build_analytics(
     let first_timestamp = local_midnight(first_day).timestamp();
     let end_timestamp = local_midnight(day_after_today).timestamp();
 
-    let (profile, media_items) = get_snapshot(state, force_refresh).await;
+    let (profile, media_items) = get_snapshot(state, account_id, &service, force_refresh).await;
+    let account_username = state
+        .connected_accounts()
+        .await
+        .ok()
+        .and_then(|accounts| {
+            accounts
+                .into_iter()
+                .find(|account| account.id == account_id)
+        })
+        .map(|account| account.username)
+        .unwrap_or_default();
     let username = profile
         .get("username")
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
-        .unwrap_or(&state.config.instagram_username);
+        .unwrap_or(&account_username);
     let followers_count = profile
         .get("followers_count")
         .cloned()
@@ -72,16 +84,29 @@ pub async fn build_analytics(
         )
         .await
         .ok();
+    let follower_changes_24h = match service
+        .get_follower_changes(last_24_hours_since, last_24_hours_until)
+        .await
+    {
+        Ok(changes) => Some(changes),
+        Err(error) => {
+            tracing::warn!(error = %error, "Meta follower gain/loss insights are unavailable");
+            None
+        }
+    };
 
     let days = (0..days_count)
         .map(|index| first_day + ChronoDuration::days(index))
         .collect::<Vec<_>>();
     let daily_results = stream::iter(days.iter().copied())
-        .map(|day| async move {
-            let since = local_midnight(day).timestamp();
-            let until = local_midnight(day + ChronoDuration::days(1)).timestamp();
-            let result = service.get_account_insights(&["views"], since, until).await;
-            result.map(|values| (day, *values.get("views").unwrap_or(&0)))
+        .map(|day| {
+            let service = service.clone();
+            async move {
+                let since = local_midnight(day).timestamp();
+                let until = local_midnight(day + ChronoDuration::days(1)).timestamp();
+                let result = service.get_account_insights(&["views"], since, until).await;
+                result.map(|values| (day, *values.get("views").unwrap_or(&0)))
+            }
         })
         .buffer_unordered(META_CONCURRENCY)
         .collect::<Vec<_>>()
@@ -166,18 +191,21 @@ pub async fn build_analytics(
     }
 
     let view_results = stream::iter(reels.into_iter().enumerate())
-        .map(|(index, (day, mut reel))| async move {
-            let media_id = reel
-                .get("id")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            if let Ok(views) = service.get_media_views(&media_id).await
-                && let Some(object) = reel.as_object_mut()
-            {
-                object.insert("views".into(), json!(views));
+        .map(|(index, (day, mut reel))| {
+            let service = service.clone();
+            async move {
+                let media_id = reel
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                if let Ok(views) = service.get_media_views(&media_id).await
+                    && let Some(object) = reel.as_object_mut()
+                {
+                    object.insert("views".into(), json!(views));
+                }
+                (index, day, reel)
             }
-            (index, day, reel)
         })
         .buffer_unordered(META_CONCURRENCY)
         .collect::<Vec<_>>()
@@ -235,6 +263,8 @@ pub async fn build_analytics(
         "reels_count": flat_reels.len(),
         "views_24h": last_24_hours_metrics.as_ref().and_then(|values| values.get("views")).copied(),
         "reach_24h": last_24_hours_metrics.as_ref().and_then(|values| values.get("reach")).copied(),
+        "followers_gained_24h": follower_changes_24h.map(|(gained, _)| gained),
+        "followers_lost_24h": follower_changes_24h.map(|(_, lost)| lost),
         "reels_count_24h": reels_count_24h,
     });
 
@@ -252,22 +282,34 @@ pub async fn build_analytics(
     }))
 }
 
-async fn get_snapshot(state: &AppState, force_refresh: bool) -> (Value, Vec<Value>) {
+async fn get_snapshot(
+    state: &AppState,
+    account_id: &str,
+    service: &crate::meta::MetaClient,
+    force_refresh: bool,
+) -> (Value, Vec<Value>) {
+    {
+        let cached = state.analytics_snapshot.lock().await;
+        if !force_refresh
+            && let Some((at, profile, media)) = cached.get(account_id)
+            && at.elapsed() < CACHE_TTL
+        {
+            return (profile.clone(), media.clone());
+        }
+    }
+    let profile = service.get_profile().await.unwrap_or_else(|_| json!({}));
+    let media = service.get_recent_media(100).await.unwrap_or_default();
     let mut cached = state.analytics_snapshot.lock().await;
     if !force_refresh
-        && let Some((at, profile, media)) = cached.as_ref()
+        && let Some((at, cached_profile, cached_media)) = cached.get(account_id)
         && at.elapsed() < CACHE_TTL
     {
-        return (profile.clone(), media.clone());
+        return (cached_profile.clone(), cached_media.clone());
     }
-    let (profile, media) = if let Some(service) = state.service.as_ref() {
-        let profile = service.get_profile().await.unwrap_or_else(|_| json!({}));
-        let media = service.get_recent_media(100).await.unwrap_or_default();
-        (profile, media)
-    } else {
-        (json!({}), Vec::new())
-    };
-    *cached = Some((Instant::now(), profile.clone(), media.clone()));
+    cached.insert(
+        account_id.to_string(),
+        (Instant::now(), profile.clone(), media.clone()),
+    );
     (profile, media)
 }
 

@@ -1,6 +1,6 @@
 # Backend Rust do Instagram
 
-O backend Axum serve o planner em `http://127.0.0.1:3000`, recebe Stories e Reels de teste em formulários multipart, mantém agendamentos em `backend/data/schedules.json` e verifica publicações vencidas a cada dois segundos.
+O backend Axum serve o planner em `http://127.0.0.1:3000`, publica posts, carrosséis, Stories e Reels comuns ou de teste pela API do Instagram, mantém agendamentos em `backend/data/schedules.json` e usa um scheduler global que acorda no próximo horário, processa em paralelo entre contas e serializa por conta.
 
 ## Configuração
 
@@ -49,7 +49,14 @@ FFmpeg converte PNG para JPEG e remuxa Reels sem recodificar áudio/vídeo, com 
 
 ## API da Meta e análises
 
-Para um Story, o backend cria um container `STORIES` com `image_url` ou `video_url`, aguarda `status_code=FINISHED` e chama `media_publish`. Reels de teste usam `REELS` e `trial_params`; containers `ERROR` ou `EXPIRED` mantêm o ID e os detalhes devolvidos pela Meta no registro falho. Tokens não são salvos nos registros.
+As rotas de publicação recebem `multipart/form-data` com `account_id`, `action` (`publish_now` ou `schedule`), `caption`, `scheduled_at` quando agendado e um ou mais campos `media`:
+
+- `POST /api/posts`: uma imagem e uma legenda.
+- `POST /api/carousels`: de 2 a 10 imagens e/ou vídeos. Cada campo `media` vira um item do carrossel; o primeiro arquivo é a capa.
+- `POST /api/reels`: um vídeo. O padrão é Reel comum publicado no Feed; envie `publication_type=test_reel` explicitamente para o fluxo separado de Reel de teste.
+- `POST /api/stories`: uma imagem ou vídeo.
+
+Posts, Reels e Stories criam um container, aguardam `status_code=FINISHED` e chamam `media_publish`. O carrossel cria containers para cada item, espera todos ficarem prontos, cria o container principal e publica o conjunto. Reels de teste usam `trial_params`; containers `ERROR` ou `EXPIRED` mantêm o ID e os detalhes devolvidos pela Meta no registro falho. Tokens não são salvos nos registros.
 
 Antes de enviar um Reel, o backend calcula SHA-256 e recusa mídia repetida com HTTP 409. O worker também verifica duplicatas entre agendamentos vencidos.
 

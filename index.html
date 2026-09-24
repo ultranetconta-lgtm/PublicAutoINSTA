@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Criar nova publicação - Metricool Planner</title>
+  <title>InstaFlux — Planejador e publicador do Instagram</title>
+  <meta name="description" content="InstaFlux: planeje, agende, publique e acompanhe conteúdos do Instagram em um só lugar.">
+  <link rel="icon" type="image/png" href="assets/instaflux-icon.png?v=2">
   
   <!-- FontAwesome 6 CDN -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -18,8 +20,8 @@
   <script src="https://cdn.tailwindcss.com"></script>
   
   <!-- Application Styles -->
-  <link rel="stylesheet" href="css/styles.css?v=schedule-dates-newest-20260923">
-  <link rel="stylesheet" href="css/analises.css?v=chart-tooltip-times-20260923">
+  <link rel="stylesheet" href="css/styles.css?v=carousel-remove-20260924">
+  <link rel="stylesheet" href="css/analises.css?v=reel-performance-layout-20260924">
 </head>
 <body>
 
@@ -30,15 +32,34 @@
     <header class="page-header">
       <div class="page-header-title-row">
         <div class="flex items-center gap-6">
+          <div class="site-brand" aria-label="InstaFlux, planejador e publicador do Instagram">
+            <img src="assets/instaflux-icon.png?v=2" alt="Ícone do InstaFlux">
+            <div class="site-brand__copy">
+              <span class="site-brand__name">InstaFlux</span>
+              <span class="site-brand__tagline">Publicações e agenda</span>
+            </div>
+          </div>
           <div class="flex items-center gap-3">
             <h1 class="text-2xl font-bold text-gray-900 tracking-tight">Criar nova publicação</h1>
             
-            <!-- Brand Pill (Profile) -->
-            <div class="brand-pill cursor-pointer" title="alesantorooficial">
-              <div class="v-avatar">
-                <img src="assets/avatar.jpg" alt="Alessandra Santoro" onerror="this.src='https://ui-avatars.com/api/?name=Alessandra+Santoro&background=0284c7&color=fff'">
+            <!-- Active Instagram account and account switcher -->
+            <div class="account-switcher">
+              <button type="button" class="brand-pill" id="accountSelectorButton" title="Selecionar conta do Instagram" aria-haspopup="true" aria-expanded="false" aria-controls="accountDropdown">
+                <span class="v-avatar" aria-hidden="true">
+                  <img src="assets/avatar.jpg" alt="">
+                </span>
+                <span class="brand-pill__name truncate max-w-[160px]" id="activeAccountUsername">Carregando contas…</span>
+                <i class="fa-solid fa-chevron-down account-switcher-chevron" aria-hidden="true"></i>
+              </button>
+              <div class="account-menu" id="accountDropdown" role="menu" aria-label="Contas conectadas" hidden>
+                <div class="account-menu-heading">Contas conectadas</div>
+                <div class="account-menu-list" id="accountMenuList"></div>
+                <div class="account-menu-divider"></div>
+                <button type="button" class="account-menu-add" id="btnAddInstagramAccount" role="menuitem">
+                  <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                  <span>Adicionar nova conta</span>
+                </button>
               </div>
-              <span class="brand-pill__name truncate max-w-[160px]">alesantorooficial</span>
             </div>
           </div>
 
@@ -51,7 +72,7 @@
             <button type="button" class="top-nav-tab" id="tabBtnAgendamentos" data-tab="agendamentos">
               <i class="fa-solid fa-calendar-days text-sm"></i>
               <span>Agendamentos</span>
-              <span class="tab-badge" id="agendamentosCountBadge">3</span>
+              <span class="tab-badge" id="agendamentosCountBadge">0</span>
             </button>
             <button type="button" class="top-nav-tab" id="tabBtnAnalises" data-tab="analises">
               <i class="fa-solid fa-chart-line text-sm"></i>
@@ -90,7 +111,7 @@
                 </div>
               </div>
               <button type="button" class="network-mode-btn" id="btnNetworkMode">
-                <span id="currentNetworkModeText">REELS DE TESTE</span>
+                <span id="currentNetworkModeText">REEL</span>
                 <i class="fa-solid fa-chevron-down text-[9px] text-gray-500"></i>
               </button>
             </div>
@@ -110,13 +131,24 @@
               </div>
               <div class="item-info">
                 <div class="item-title">Post</div>
-                <div class="item-subtitle">Publicação automática de uma imagem ou um carrossel</div>
+                <div class="item-subtitle">Publicação automática de uma foto com legenda</div>
               </div>
               <div class="item-check hidden"><i class="fa-solid fa-check"></i></div>
             </div>
 
-            <!-- 2. Reel -->
-            <div class="network-dropdown-item" data-mode="reel" data-label="REEL">
+            <div class="network-dropdown-item" data-mode="carousel" data-label="CARROSSEL">
+              <div class="item-icon">
+                <i class="fa-solid fa-images"></i>
+              </div>
+              <div class="item-info">
+                <div class="item-title">Carrossel</div>
+                <div class="item-subtitle">Publicação de 2 a 10 fotos ou vídeos</div>
+              </div>
+              <div class="item-check hidden"><i class="fa-solid fa-check"></i></div>
+            </div>
+
+            <!-- Reel comum -->
+            <div class="network-dropdown-item active" data-mode="reel" data-label="REEL">
               <div class="item-icon">
                 <i class="fa-solid fa-film"></i>
               </div>
@@ -124,10 +156,10 @@
                 <div class="item-title">Reel</div>
                 <div class="item-subtitle">Publicação automática de um vídeo</div>
               </div>
-              <div class="item-check hidden"><i class="fa-solid fa-check"></i></div>
+              <div class="item-check"><i class="fa-solid fa-check"></i></div>
             </div>
 
-            <!-- 3. Story -->
+            <!-- Story -->
             <div class="network-dropdown-item" data-mode="story" data-label="STORY">
               <div class="item-icon">
                 <i class="fa-regular fa-circle-dot"></i>
@@ -139,8 +171,8 @@
               <div class="item-check hidden"><i class="fa-solid fa-check"></i></div>
             </div>
 
-            <!-- 4. Reels de teste (Active) -->
-            <div class="network-dropdown-item active" data-mode="test_reel" data-label="REELS DE TESTE">
+            <!-- Reels de teste -->
+            <div class="network-dropdown-item" data-mode="test_reel" data-label="REELS DE TESTE">
               <div class="item-icon">
                 <i class="fa-solid fa-clapperboard"></i>
               </div>
@@ -148,7 +180,7 @@
                 <div class="item-title">Reels de teste</div>
                 <div class="item-subtitle">Postagem automática de uma fileira de teste</div>
               </div>
-              <div class="item-check"><i class="fa-solid fa-check"></i></div>
+              <div class="item-check hidden"><i class="fa-solid fa-check"></i></div>
             </div>
           </div>
 
@@ -183,7 +215,19 @@
                   <i class="fa-solid fa-ellipsis"></i>
                 </button>
               </div>
+              <span class="carousel-selection-hint" id="carouselSelectionHint" hidden></span>
             </div>
+
+            <section class="carousel-attachments-box" id="carouselAttachmentsBox" aria-label="Ordem das mídias do carrossel" hidden>
+              <div class="carousel-attachments-heading">
+                <div>
+                  <strong>Ordem do carrossel</strong>
+                  <span>Arraste as mídias para definir a sequência.</span>
+                </div>
+                <span class="carousel-attachment-count" id="carouselAttachmentCount"></span>
+              </div>
+              <ol class="carousel-attachments-list" id="carouselAttachmentsList" aria-label="Mídias em ordem de publicação"></ol>
+            </section>
 
             <!-- Editor Action Bar / Toolbar -->
             <div class="editor-toolbar">
@@ -427,6 +471,16 @@
               <!-- O vídeo só aparece após o usuário selecionar um arquivo. -->
               <video id="previewVideo" class="reels-active-media" loop playsinline muted></video>
 
+              <div class="carousel-preview-controls hidden" id="carouselPreviewControls" hidden aria-label="Navegação da prévia do carrossel">
+                <button type="button" class="carousel-preview-arrow" id="btnCarouselPrev" aria-label="Mídia anterior" title="Mídia anterior">
+                  <i class="fa-solid fa-chevron-left" aria-hidden="true"></i>
+                </button>
+                <span class="carousel-preview-position" id="carouselPreviewPosition" aria-live="polite">1 / 1</span>
+                <button type="button" class="carousel-preview-arrow" id="btnCarouselNext" aria-label="Próxima mídia" title="Próxima mídia">
+                  <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                </button>
+              </div>
+
               <!-- Video Center Playback Controls Overlay (Screenshot 3) -->
               <div class="reels-video-controls-overlay hidden" id="videoControlsOverlay">
                 <!-- Video Buttons (Rewind, Play/Pause, Forward) -->
@@ -456,7 +510,7 @@
                   <div class="reels-avatar">
                     <img src="assets/avatar.jpg" alt="Alessandra Santoro" onerror="this.src='https://ui-avatars.com/api/?name=Alessandra+Santoro&background=0284c7&color=fff'">
                   </div>
-                  <span class="reels-username">alesantorooficial</span>
+                  <span class="reels-username" id="previewAccountUsername">alesantorooficial</span>
                 </div>
 
                 <!-- Live Synchronized Caption -->
@@ -535,6 +589,7 @@
               <button type="button" class="filter-pill active" data-filter="all">Todos</button>
               <button type="button" class="filter-pill" data-filter="reel">Reels</button>
               <button type="button" class="filter-pill" data-filter="post">Posts</button>
+              <button type="button" class="filter-pill" data-filter="carousel">Carrosséis</button>
               <button type="button" class="filter-pill" data-filter="story">Stories</button>
             </div>
             <div class="calendar-status-filter" id="calendarStatusFilter">
@@ -623,7 +678,7 @@
               <span>Análises de Desempenho</span>
               <span class="analises-account-badge">
                 <span class="analises-pulse-dot"></span>
-                @alesantorooficial
+                <span id="activeAnalyticsAccount">@alesantorooficial</span>
               </span>
             </h2>
             <p id="analyticsFreshness" aria-live="polite">
@@ -702,7 +757,7 @@
             </div>
             <div class="apple-metric-footer apple-metric-footer--stacked">
               <span>Total atual da conta</span>
-              <span class="apple-metric-subvalue" id="metricFollows24h">Últimas 24 horas: ganhos — · perdas —</span>
+              <span class="apple-metric-subvalue" id="metricFollows24h">Últimas 24 horas: carregando dados da Meta…</span>
             </div>
           </div>
 
@@ -779,7 +834,10 @@
         <!-- Recent Reels Section (Grade de Reels Publicados) -->
         <div class="analises-reels-section">
           <div class="analises-reels-header">
-            <h3>Reels Publicados no Período</h3>
+            <div class="analises-reels-heading-copy">
+              <h3>Reels Publicados no Período</h3>
+              <p>Compara visualizações com a mediana do período; Reels recentes podem ter menos tempo para acumulá-las.</p>
+            </div>
             <span id="appleReelsCountBadge">Carregando...</span>
           </div>
           <div class="apple-reels-grid" id="appleReelsGrid">
@@ -819,7 +877,7 @@
           </div>
           <div class="flex items-center gap-1.5">
             <img src="assets/avatar.jpg" class="w-5 h-5 rounded-full object-cover">
-            <span class="font-medium text-gray-700">alesantorooficial</span>
+            <span class="font-medium text-gray-700" id="modalDetailAccountUsername">alesantorooficial</span>
           </div>
         </div>
         <!-- Caption -->
@@ -995,6 +1053,33 @@
     </div>
   </div>
 
+  <!-- Modal: connect an Instagram account -->
+  <div class="account-connect-overlay" id="accountConnectModal" hidden>
+    <section class="account-connect-dialog" role="dialog" aria-modal="true" aria-labelledby="accountConnectTitle" aria-describedby="accountConnectDescription" tabindex="-1">
+      <div class="account-connect-heading">
+        <div class="account-connect-icon"><i class="fa-brands fa-instagram" aria-hidden="true"></i></div>
+        <button type="button" class="account-connect-close" id="btnCloseAccountConnect" aria-label="Fechar">
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        </button>
+      </div>
+      <h2 id="accountConnectTitle">Conectar conta do Instagram</h2>
+      <p id="accountConnectDescription">Cole o token de acesso da conta profissional. A Meta vai validar o token e identificar o perfil conectado.</p>
+      <form id="accountConnectForm">
+        <label for="instagramAccessToken">Token de acesso</label>
+        <input id="instagramAccessToken" name="access_token" type="password" autocomplete="new-password" spellcheck="false" required maxlength="8192" placeholder="Cole seu token da Meta">
+        <p class="account-connect-note">O token é armazenado apenas no servidor do planejador, não aparece na lista de contas e não fica salvo no navegador.</p>
+        <p class="account-connect-error" id="accountConnectError" role="alert" hidden></p>
+        <div class="account-connect-actions">
+          <button type="button" class="account-connect-cancel" id="btnCancelAccountConnect">Cancelar</button>
+          <button type="submit" class="account-connect-submit" id="btnSubmitAccountConnect">
+            <i class="fa-solid fa-link" aria-hidden="true"></i>
+            <span>Validar e conectar</span>
+          </button>
+        </div>
+      </form>
+    </section>
+  </div>
+
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toastContainer"></div>
 
@@ -1048,7 +1133,7 @@
   <div class="apple-reel-popover" id="appleReelPopover"></div>
 
   <!-- Application Logic -->
-  <script src="js/analises.js?v=chart-tooltip-times-20260923"></script>
-  <script src="js/app.js?v=schedule-upcoming-first-20260923"></script>
+  <script src="js/analises.js?v=reel-grid-layout-20260924"></script>
+  <script src="js/app.js?v=carousel-remove-20260924"></script>
 </body>
 </html>

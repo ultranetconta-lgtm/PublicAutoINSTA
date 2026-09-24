@@ -2,6 +2,7 @@ use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{Map, Value};
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -72,9 +73,13 @@ impl ScheduleStore {
 
     pub async fn create(&self, payload: Value) -> Result<Value> {
         let allowed = [
+            "account_id",
+            "account_username",
             "type",
             "media_filename",
+            "media_filenames",
             "media_kind",
+            "media_kinds",
             "caption",
             "scheduled_at",
             "status",
@@ -155,12 +160,21 @@ impl ScheduleStore {
     }
 
     pub async fn claim_due(&self, now: DateTime<Utc>) -> Result<Vec<Value>> {
+        self.claim_due_excluding_accounts(now, "", &HashSet::new())
+            .await
+    }
+
+    pub async fn claim_due_excluding_accounts(
+        &self,
+        now: DateTime<Utc>,
+        default_account_id: &str,
+        active_accounts: &HashSet<String>,
+    ) -> Result<Vec<Value>> {
         let _guard = self.lock.lock().await;
         let mut records = self.read_records().await?;
-        let mut claimed = Vec::new();
-        let mut changed = false;
-        for record in &mut records {
-            let Some(object) = record.as_object_mut() else {
+        let mut due = Vec::new();
+        for (index, record) in records.iter().enumerate() {
+            let Some(object) = record.as_object() else {
                 continue;
             };
             if object.get("status").and_then(Value::as_str) != Some("scheduled") {
@@ -169,21 +183,88 @@ impl ScheduleStore {
             let Some(scheduled_at) = object.get("scheduled_at").and_then(Value::as_str) else {
                 continue;
             };
-            let Ok(due_at) = DateTime::parse_from_rfc3339(scheduled_at) else {
+            let Ok(scheduled_at) = DateTime::parse_from_rfc3339(scheduled_at) else {
                 continue;
             };
-            if due_at.with_timezone(&Utc) <= now {
-                let updated_at = utc_now_iso();
-                object.insert("status".into(), Value::String("processing".into()));
-                object.insert("updated_at".into(), Value::String(updated_at));
-                claimed.push(record.clone());
-                changed = true;
+            let scheduled_at = scheduled_at.with_timezone(&Utc);
+            if scheduled_at > now {
+                continue;
             }
+            let account_id = object
+                .get("account_id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.trim().is_empty())
+                .unwrap_or(default_account_id);
+            if active_accounts.contains(account_id) {
+                continue;
+            }
+            let created_at = object
+                .get("created_at")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            due.push((scheduled_at, created_at, index));
+        }
+        due.sort_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| left.1.cmp(&right.1))
+                .then_with(|| right.2.cmp(&left.2))
+        });
+
+        let mut claimed = Vec::with_capacity(due.len());
+        let mut changed = false;
+        for (_, _, index) in due {
+            let record = &mut records[index];
+            let Some(object) = record.as_object_mut() else {
+                continue;
+            };
+            object.insert("status".into(), Value::String("processing".into()));
+            object.insert("updated_at".into(), Value::String(utc_now_iso()));
+            claimed.push(record.clone());
+            changed = true;
         }
         if changed {
             self.write_records(&records).await?;
         }
         Ok(claimed)
+    }
+
+    pub async fn next_scheduled_at_excluding_accounts(
+        &self,
+        default_account_id: &str,
+        active_accounts: &HashSet<String>,
+    ) -> Result<Option<DateTime<Utc>>> {
+        let _guard = self.lock.lock().await;
+        let records = self.read_records().await?;
+        let mut next_scheduled_at = None;
+        for record in records {
+            let Some(object) = record.as_object() else {
+                continue;
+            };
+            if object.get("status").and_then(Value::as_str) != Some("scheduled") {
+                continue;
+            }
+            let account_id = object
+                .get("account_id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.trim().is_empty())
+                .unwrap_or(default_account_id);
+            if active_accounts.contains(account_id) {
+                continue;
+            }
+            let Some(scheduled_at) = object.get("scheduled_at").and_then(Value::as_str) else {
+                continue;
+            };
+            let Ok(scheduled_at) = DateTime::parse_from_rfc3339(scheduled_at) else {
+                continue;
+            };
+            let scheduled_at = scheduled_at.with_timezone(&Utc);
+            if next_scheduled_at.is_none_or(|current| scheduled_at < current) {
+                next_scheduled_at = Some(scheduled_at);
+            }
+        }
+        Ok(next_scheduled_at)
     }
 
     pub async fn delete(&self, schedule_id: &str) -> Result<bool> {

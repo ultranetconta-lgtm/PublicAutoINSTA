@@ -1,3 +1,4 @@
+pub mod accounts;
 pub mod analytics;
 pub mod app;
 pub mod config;

@@ -5,6 +5,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const charCounter = document.getElementById('charCounter');
   const previewCaption = document.getElementById('previewCaption');
   const fileInput = document.getElementById('mediaFileInput');
+  const carouselSelectionHint = document.getElementById('carouselSelectionHint');
+  const carouselAttachmentsBox = document.getElementById('carouselAttachmentsBox');
+  const carouselAttachmentsList = document.getElementById('carouselAttachmentsList');
+  const carouselAttachmentCount = document.getElementById('carouselAttachmentCount');
   const btnAddMedia = document.getElementById('btnAddMedia');
   const networkAddButton = document.querySelector('.network-add-btn');
   const editorMediaPreviewArea = document.getElementById('editorMediaPreviewArea');
@@ -16,11 +20,239 @@ document.addEventListener('DOMContentLoaded', () => {
   const composerMessageBoxTitle = document.getElementById('composerMessageBoxTitle');
   const composerMessageBoxDescription = document.getElementById('composerMessageBoxDescription');
   const composerMessageBoxActions = document.getElementById('composerMessageBoxActions');
+  const accountSelectorButton = document.getElementById('accountSelectorButton');
+  const accountDropdown = document.getElementById('accountDropdown');
+  const accountMenuList = document.getElementById('accountMenuList');
+  const activeAccountUsername = document.getElementById('activeAccountUsername');
+  const accountConnectModal = document.getElementById('accountConnectModal');
+  const accountConnectForm = document.getElementById('accountConnectForm');
+  const instagramAccessToken = document.getElementById('instagramAccessToken');
+  const accountConnectError = document.getElementById('accountConnectError');
+  const btnSubmitAccountConnect = document.getElementById('btnSubmitAccountConnect');
+  let connectedAccounts = [];
+  let activeInstagramAccount = null;
+  let accountsLoaded = false;
+  const ACTIVE_ACCOUNT_STORAGE_KEY = 'instaflux.activeInstagramAccountId';
+
+  window.getActiveInstagramAccountId = () => activeInstagramAccount?.id || '';
+  window.getActiveInstagramAccountUsername = () => activeInstagramAccount?.username || '';
+
+  function accountScopedUrl(path, accountId = activeInstagramAccount?.id) {
+    if (!accountId) return path;
+    const separator = path.includes('?') ? '&' : '?';
+    return `${path}${separator}account_id=${encodeURIComponent(accountId)}`;
+  }
+
+  function renderAccountMenu() {
+    if (!accountMenuList) return;
+    accountMenuList.replaceChildren();
+    if (connectedAccounts.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'account-menu-empty';
+      empty.textContent = 'Nenhuma conta conectada. Adicione uma conta para começar a publicar.';
+      accountMenuList.appendChild(empty);
+      return;
+    }
+
+    connectedAccounts.forEach(account => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = `account-menu-item${activeInstagramAccount?.id === account.id ? ' active' : ''}`;
+      item.dataset.accountId = account.id;
+      item.setAttribute('role', 'menuitemradio');
+      item.setAttribute('aria-checked', String(activeInstagramAccount?.id === account.id));
+      const avatar = document.createElement('span');
+      avatar.className = 'account-menu-avatar';
+      avatar.setAttribute('aria-hidden', 'true');
+      avatar.textContent = (account.username || '?').replace(/^@/, '').slice(0, 1).toUpperCase();
+      const username = document.createElement('span');
+      username.className = 'account-menu-username';
+      username.textContent = `@${String(account.username || account.id).replace(/^@/, '')}`;
+      item.append(avatar, username);
+      if (activeInstagramAccount?.id === account.id) {
+        const check = document.createElement('i');
+        check.className = 'fa-solid fa-check account-menu-check';
+        check.setAttribute('aria-label', 'Conta ativa');
+        item.appendChild(check);
+      }
+      accountMenuList.appendChild(item);
+    });
+  }
+
+  function setAccountDropdownOpen(open) {
+    if (!accountSelectorButton || !accountDropdown) return;
+    accountDropdown.hidden = !open;
+    accountSelectorButton.setAttribute('aria-expanded', String(open));
+  }
+
+  function updateActiveAccountLabels() {
+    const username = activeInstagramAccount?.username || '';
+    const displayName = username ? `@${username.replace(/^@/, '')}` : 'Conecte uma conta';
+    if (activeAccountUsername) activeAccountUsername.textContent = displayName;
+    if (accountSelectorButton) accountSelectorButton.title = username ? `Conta ativa: ${displayName}` : 'Conectar conta do Instagram';
+    const previewName = document.getElementById('previewAccountUsername');
+    if (previewName) previewName.textContent = username || 'Instagram';
+    const analyticsName = document.getElementById('activeAnalyticsAccount');
+    if (analyticsName) analyticsName.textContent = username ? `@${username.replace(/^@/, '')}` : 'Nenhuma conta conectada';
+    const detailName = document.getElementById('modalDetailAccountUsername');
+    if (detailName) detailName.textContent = username || 'Instagram';
+  }
+
+  function setActiveInstagramAccount(account, options = {}) {
+    if (!account?.id) return;
+    const changed = activeInstagramAccount?.id !== account.id;
+    activeInstagramAccount = account;
+    if (options.persist !== false) {
+      try { localStorage.setItem(ACTIVE_ACCOUNT_STORAGE_KEY, account.id); } catch (_) {}
+    }
+    renderAccountMenu();
+    updateActiveAccountLabels();
+    if (uploadProgressOverlay?.hidden) {
+      if (btnSchedule) btnSchedule.disabled = false;
+      if (btnScheduleDropdown) btnScheduleDropdown.disabled = false;
+    }
+    if (!changed || options.reload === false || !accountsLoaded) return;
+
+    scheduledPosts = [];
+    backendSchedulesLoaded = false;
+    updateScheduleBadge();
+    renderCalendar();
+    renderListView();
+    loadSchedules();
+    document.dispatchEvent(new CustomEvent('instagram-account-changed', { detail: { account } }));
+  }
+
+  function openAccountConnectModal() {
+    setAccountDropdownOpen(false);
+    accountConnectError.hidden = true;
+    accountConnectError.textContent = '';
+    accountConnectModal.hidden = false;
+    window.setTimeout(() => instagramAccessToken?.focus(), 0);
+  }
+
+  function closeAccountConnectModal() {
+    if (btnSubmitAccountConnect?.disabled) return;
+    accountConnectModal.hidden = true;
+    accountConnectForm?.reset();
+    if (accountConnectError) {
+      accountConnectError.hidden = true;
+      accountConnectError.textContent = '';
+    }
+  }
+
+  accountSelectorButton?.addEventListener('click', event => {
+    event.stopPropagation();
+    setAccountDropdownOpen(accountDropdown.hidden);
+  });
+  accountDropdown?.addEventListener('click', event => event.stopPropagation());
+  accountMenuList?.addEventListener('click', event => {
+    const item = event.target.closest('button[data-account-id]');
+    if (!item) return;
+    const account = connectedAccounts.find(candidate => candidate.id === item.dataset.accountId);
+    if (!account) return;
+    const changed = activeInstagramAccount?.id !== account.id;
+    setAccountDropdownOpen(false);
+    setActiveInstagramAccount(account);
+    if (changed) showToast(`Conta ativa: @${account.username.replace(/^@/, '')}`, 'info');
+  });
+  document.getElementById('btnAddInstagramAccount')?.addEventListener('click', openAccountConnectModal);
+  document.getElementById('btnCloseAccountConnect')?.addEventListener('click', closeAccountConnectModal);
+  document.getElementById('btnCancelAccountConnect')?.addEventListener('click', closeAccountConnectModal);
+  accountConnectModal?.addEventListener('click', event => {
+    if (event.target === accountConnectModal) closeAccountConnectModal();
+  });
+  document.addEventListener('click', event => {
+    if (!event.target.closest('.account-switcher')) setAccountDropdownOpen(false);
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      setAccountDropdownOpen(false);
+      closeAccountConnectModal();
+    }
+  });
+
+  accountConnectForm?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const accessToken = instagramAccessToken.value.trim();
+    if (!accessToken) {
+      accountConnectError.textContent = 'Cole o token de acesso para continuar.';
+      accountConnectError.hidden = false;
+      return;
+    }
+    btnSubmitAccountConnect.disabled = true;
+    btnSubmitAccountConnect.querySelector('span').textContent = 'Validando token…';
+    accountConnectError.hidden = true;
+    try {
+      const response = await fetch('/api/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ access_token: accessToken }),
+        cache: 'no-store'
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.account?.id) {
+        throw new Error(payload.message || 'A Meta não validou esse token. Confira o token e as permissões da conta profissional.');
+      }
+      const account = {
+        id: String(payload.account.id),
+        username: String(payload.account.username || payload.account.id).replace(/^@/, '')
+      };
+      connectedAccounts = [...connectedAccounts.filter(existing => existing.id !== account.id), account];
+      accountsLoaded = true;
+      accountConnectModal.hidden = true;
+      accountConnectForm.reset();
+      renderAccountMenu();
+      setActiveInstagramAccount(account);
+      showToast(`Conta @${account.username} conectada e selecionada.`, 'success');
+    } catch (error) {
+      accountConnectError.textContent = error.message || 'Não foi possível conectar a conta.';
+      accountConnectError.hidden = false;
+    } finally {
+      btnSubmitAccountConnect.disabled = false;
+      btnSubmitAccountConnect.querySelector('span').textContent = 'Validar e conectar';
+    }
+  });
+
+  async function loadConnectedAccounts() {
+    try {
+      const response = await fetch('/api/accounts', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      if (!response.ok) throw new Error('accounts_unavailable');
+      const payload = await response.json();
+      connectedAccounts = Array.isArray(payload.accounts)
+        ? payload.accounts.filter(account => account?.id && account?.username).map(account => ({
+          id: String(account.id),
+          username: String(account.username).replace(/^@/, '')
+        }))
+        : [];
+    } catch (_) {
+      connectedAccounts = [];
+    }
+    accountsLoaded = true;
+    renderAccountMenu();
+    const storedId = (() => {
+      try { return localStorage.getItem(ACTIVE_ACCOUNT_STORAGE_KEY); } catch (_) { return null; }
+    })();
+    const selected = connectedAccounts.find(account => account.id === storedId) || connectedAccounts[0];
+    if (selected) {
+      setActiveInstagramAccount(selected, { reload: false, persist: Boolean(storedId && selected.id === storedId) });
+    } else {
+      activeInstagramAccount = null;
+      updateActiveAccountLabels();
+      if (btnSchedule) btnSchedule.disabled = true;
+      if (btnScheduleDropdown) btnScheduleDropdown.disabled = true;
+    }
+    document.dispatchEvent(new CustomEvent('instagram-account-changed', { detail: { account: selected || null } }));
+    if (selected) loadSchedules();
+  }
 
   const previewMediaLayer = document.getElementById('previewMediaLayer');
   const mediaEmptyPlaceholder = document.getElementById('mediaEmptyPlaceholder');
   const previewImage = document.getElementById('previewImage');
   const previewVideo = document.getElementById('previewVideo');
+  const carouselPreviewControls = document.getElementById('carouselPreviewControls');
+  const carouselPreviewPosition = document.getElementById('carouselPreviewPosition');
+  const btnCarouselPrev = document.getElementById('btnCarouselPrev');
+  const btnCarouselNext = document.getElementById('btnCarouselNext');
   const videoControlsOverlay = document.getElementById('videoControlsOverlay');
   const btnReelPlayPause = document.getElementById('btnReelPlayPause');
   const reelPlayIcon = document.getElementById('reelPlayIcon');
@@ -29,13 +261,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Network selector elements
   const networkSelectorTrigger = document.getElementById('networkSelectorTrigger');
+  const networkBadgeIcon = document.getElementById('networkBadgeIcon');
   const btnNetworkMode = document.getElementById('btnNetworkMode');
   const networkDropdownMenu = document.getElementById('networkDropdownMenu');
   const currentNetworkModeText = document.getElementById('currentNetworkModeText');
   const networkDropdownItems = document.querySelectorAll('.network-dropdown-item');
-  let currentMode = 'test_reel';
+  let currentMode = 'reel';
   let selectedPublishAction = 'schedule';
   let currentMedia = null;
+  let selectedCarouselFiles = [];
+  let carouselPreviewIndex = 0;
+  const carouselAttachmentUrls = new Map();
+  networkBadgeIcon.classList.add('hidden');
 
   // Hashtags autocomplete elements
   const btnHashtag = document.getElementById('btnHashtag');
@@ -47,6 +284,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnToggleWarning = document.getElementById('btnToggleWarning');
   const warningAccordionBody = document.getElementById('warningAccordionBody');
   const warningChevron = document.getElementById('warningChevron');
+  warningAccordionCard.style.display = 'none';
 
   // Schedule & Dates
   const displayDate = document.getElementById('displayDate');
@@ -135,9 +373,22 @@ document.addEventListener('DOMContentLoaded', () => {
       const label = item.dataset.label;
       const mode = item.dataset.mode;
       currentMode = mode;
+      fileInput.multiple = mode === 'carousel';
+      networkBadgeIcon.classList.toggle('hidden', mode !== 'test_reel');
       currentNetworkModeText.innerText = label;
+      updateCarouselSelectionHint();
+      renderCarouselAttachments();
+      updateCarouselPreviewControls();
       const previewTitle = document.querySelector('.reels-top-title');
-      if (previewTitle) previewTitle.innerText = mode === 'story' ? 'Story' : 'Reels';
+      if (previewTitle) {
+        previewTitle.innerText = mode === 'story'
+          ? 'Story'
+          : mode === 'carousel'
+            ? 'Carrossel'
+            : mode === 'post'
+              ? 'Feed'
+              : 'Reels';
+      }
 
       // If "Reels de teste", show warning accordion; otherwise hide it
       if (mode === 'test_reel') {
@@ -184,7 +435,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // --- Media Upload & Thumbnail (Screenshot 3) ---
-  function handleMediaFile(file) {
+  function handleMediaFile(file, { quiet = false } = {}) {
     if (!file) return;
 
     const isVideo = file.type.startsWith('video/');
@@ -216,11 +467,12 @@ document.addEventListener('DOMContentLoaded', () => {
         mediaEmptyPlaceholder.classList.add('hidden');
         previewImage.classList.add('hidden');
         previewImage.style.display = 'none';
+        previewVideo.classList.remove('hidden');
         previewVideo.src = fileUrl;
         previewVideo.style.display = 'block';
-      previewVideo.play().catch(() => {});
-      videoControlsOverlay.classList.remove('hidden');
-      reelPlayIcon.className = 'fa-solid fa-pause';
+        previewVideo.play().catch(() => {});
+        videoControlsOverlay.classList.remove('hidden');
+        reelPlayIcon.className = 'fa-solid fa-pause';
     } else {
       thumbVideo.classList.add('hidden');
       thumbImage.src = fileUrl;
@@ -228,20 +480,190 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Update phone preview
       mediaEmptyPlaceholder.classList.add('hidden');
-        previewVideo.style.display = 'none';
-        previewVideo.pause();
-        previewImage.src = fileUrl;
-        previewImage.classList.remove('hidden');
-        previewImage.style.display = 'block';
-        videoControlsOverlay.classList.add('hidden');
+      previewVideo.style.display = 'none';
+      previewVideo.pause();
+      previewVideo.classList.add('hidden');
+      previewImage.src = fileUrl;
+      previewImage.classList.remove('hidden');
+      previewImage.style.display = 'block';
+      videoControlsOverlay.classList.add('hidden');
     }
 
-    showToast(isVideo ? 'Vídeo carregado com sucesso!' : 'Imagem carregada com sucesso!', 'success');
+    if (!quiet) showToast(isVideo ? 'Vídeo carregado com sucesso!' : 'Imagem carregada com sucesso!', 'success');
+  }
+
+  function updateCarouselSelectionHint() {
+    const showHint = currentMode === 'carousel' && selectedCarouselFiles.length > 0;
+    carouselSelectionHint.hidden = !showHint;
+    carouselSelectionHint.textContent = showHint
+      ? `${selectedCarouselFiles.length} mídias selecionadas. A primeira será a capa.`
+      : '';
+  }
+
+  function updateCarouselPreviewControls() {
+    const visible = currentMode === 'carousel' && selectedCarouselFiles.length > 1;
+    carouselPreviewControls.hidden = !visible;
+    carouselPreviewControls.classList.toggle('hidden', !visible);
+    carouselPreviewPosition.textContent = visible
+      ? `${carouselPreviewIndex + 1} / ${selectedCarouselFiles.length}`
+      : '1 / 1';
+    btnCarouselPrev.disabled = !visible || carouselPreviewIndex <= 0;
+    btnCarouselNext.disabled = !visible || carouselPreviewIndex >= selectedCarouselFiles.length - 1;
+  }
+
+  function carouselAttachmentUrl(file) {
+    if (!carouselAttachmentUrls.has(file)) {
+      carouselAttachmentUrls.set(file, URL.createObjectURL(file));
+    }
+    return carouselAttachmentUrls.get(file);
+  }
+
+  function revokeCarouselAttachmentUrls() {
+    for (const url of carouselAttachmentUrls.values()) URL.revokeObjectURL(url);
+    carouselAttachmentUrls.clear();
+  }
+
+  function renderCarouselAttachments() {
+    const visible = currentMode === 'carousel' && selectedCarouselFiles.length > 0;
+    carouselAttachmentsBox.hidden = !visible;
+    updateCarouselSelectionHint();
+    if (!visible) {
+      carouselAttachmentsList.replaceChildren();
+      carouselAttachmentCount.textContent = '';
+      updateCarouselPreviewControls();
+      return;
+    }
+
+    carouselAttachmentCount.textContent = `${selectedCarouselFiles.length} ${selectedCarouselFiles.length === 1 ? 'item' : 'itens'}`;
+    const items = selectedCarouselFiles.map((file, index) => {
+      const item = document.createElement('li');
+      item.className = 'carousel-attachment-item';
+      item.draggable = true;
+      item.dataset.index = String(index);
+      item.setAttribute('aria-label', `Posição ${index + 1}: ${file.name}${index === 0 ? ', capa do carrossel' : ''}`);
+
+      const url = carouselAttachmentUrl(file);
+      const media = file.type.startsWith('video/')
+        ? document.createElement('video')
+        : document.createElement('img');
+      media.className = 'carousel-attachment-preview';
+      media.src = url;
+      media.setAttribute('aria-label', file.name);
+      if (media instanceof HTMLVideoElement) {
+        media.muted = true;
+        media.playsInline = true;
+        media.preload = 'metadata';
+      } else {
+        media.alt = file.name;
+      }
+
+      const order = document.createElement('span');
+      order.className = 'carousel-attachment-order';
+      order.setAttribute('aria-hidden', 'true');
+      order.textContent = String(index + 1);
+
+      const name = document.createElement('span');
+      name.className = 'carousel-attachment-name';
+      name.textContent = file.name;
+
+      const footer = document.createElement('div');
+      footer.className = 'carousel-attachment-footer';
+      const itemType = document.createElement('span');
+      itemType.className = 'carousel-attachment-cover';
+      itemType.textContent = index === 0 ? 'Capa' : `Item ${index + 1}`;
+
+      const actions = document.createElement('div');
+      actions.className = 'carousel-attachment-actions';
+      actions.setAttribute('aria-label', `Reordenar ${file.name}`);
+      for (const direction of ['previous', 'next']) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'carousel-attachment-move';
+        button.dataset.carouselAction = direction;
+        button.setAttribute('aria-label', direction === 'previous'
+          ? `Mover item ${index + 1} para antes`
+          : `Mover item ${index + 1} para depois`);
+        button.title = direction === 'previous' ? 'Mover para a esquerda' : 'Mover para a direita';
+        button.disabled = direction === 'previous' ? index === 0 : index === selectedCarouselFiles.length - 1;
+        const icon = document.createElement('i');
+        icon.className = direction === 'previous' ? 'fa-solid fa-arrow-left' : 'fa-solid fa-arrow-right';
+        icon.setAttribute('aria-hidden', 'true');
+        button.appendChild(icon);
+        actions.appendChild(button);
+      }
+      const removeButton = document.createElement('button');
+      removeButton.type = 'button';
+      removeButton.className = 'carousel-attachment-remove';
+      removeButton.dataset.carouselAction = 'remove';
+      removeButton.setAttribute('aria-label', `Remover ${file.name} do carrossel`);
+      removeButton.title = selectedCarouselFiles.length <= 2
+        ? 'O carrossel precisa de pelo menos 2 mídias'
+        : 'Remover esta mídia';
+      removeButton.disabled = selectedCarouselFiles.length <= 2;
+      const removeIcon = document.createElement('i');
+      removeIcon.className = 'fa-solid fa-trash';
+      removeIcon.setAttribute('aria-hidden', 'true');
+      removeButton.appendChild(removeIcon);
+      actions.appendChild(removeButton);
+      footer.append(itemType, actions);
+      item.append(media, order, name, footer);
+      return item;
+    });
+    carouselAttachmentsList.replaceChildren(...items);
+    updateCarouselPreviewControls();
+  }
+
+  function showCarouselPreviewAt(index) {
+    if (!selectedCarouselFiles.length) return;
+    carouselPreviewIndex = Math.max(0, Math.min(index, selectedCarouselFiles.length - 1));
+    handleMediaFile(selectedCarouselFiles[carouselPreviewIndex], { quiet: true });
+    updateCarouselPreviewControls();
+  }
+
+  function moveCarouselItem(fromIndex, toIndex) {
+    if (fromIndex < 0 || toIndex < 0 || fromIndex >= selectedCarouselFiles.length || toIndex >= selectedCarouselFiles.length || fromIndex === toIndex) return;
+    const previewedFile = selectedCarouselFiles[carouselPreviewIndex];
+    const [movedFile] = selectedCarouselFiles.splice(fromIndex, 1);
+    selectedCarouselFiles.splice(toIndex, 0, movedFile);
+    carouselPreviewIndex = Math.max(0, selectedCarouselFiles.indexOf(previewedFile));
+    renderCarouselAttachments();
+    showCarouselPreviewAt(carouselPreviewIndex);
+  }
+
+  function removeCarouselItem(index) {
+    if (!Number.isInteger(index) || index < 0 || index >= selectedCarouselFiles.length) return;
+    if (selectedCarouselFiles.length <= 2) {
+      showToast('O carrossel precisa de pelo menos 2 mídias.', 'warning');
+      return;
+    }
+
+    const removedFile = selectedCarouselFiles[index];
+    const removedWasPreviewed = selectedCarouselFiles[carouselPreviewIndex] === removedFile;
+    const previewedFile = selectedCarouselFiles[carouselPreviewIndex];
+    const removedUrl = carouselAttachmentUrls.get(removedFile);
+    if (removedUrl) URL.revokeObjectURL(removedUrl);
+    carouselAttachmentUrls.delete(removedFile);
+    selectedCarouselFiles.splice(index, 1);
+
+    if (removedWasPreviewed) {
+      carouselPreviewIndex = Math.min(index, selectedCarouselFiles.length - 1);
+    } else {
+      carouselPreviewIndex = Math.max(0, selectedCarouselFiles.indexOf(previewedFile));
+    }
+
+    renderCarouselAttachments();
+    if (removedWasPreviewed) showCarouselPreviewAt(carouselPreviewIndex);
+    showToast('Mídia removida do carrossel.', 'info');
   }
 
   function clearAttachedMedia() {
     if (currentMedia?.url) URL.revokeObjectURL(currentMedia.url);
+    revokeCarouselAttachmentUrls();
     currentMedia = null;
+    selectedCarouselFiles = [];
+    carouselPreviewIndex = 0;
+    updateCarouselSelectionHint();
+    renderCarouselAttachments();
     fileInput.value = '';
     editorMediaPreviewArea.style.display = 'none';
 
@@ -359,10 +781,81 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   fileInput.addEventListener('change', (e) => {
-    if (e.target.files && e.target.files[0]) {
-      handleMediaFile(e.target.files[0]);
+    const files = Array.from(e.target.files || []);
+    if (currentMode === 'carousel' && files.length > 0) {
+      if (files.length < 2 || files.length > 10) {
+        showToast('Selecione de 2 a 10 mídias para o carrossel.', 'warning');
+      } else if (files.some(file => !file.type.startsWith('image/') && !file.type.startsWith('video/'))) {
+        showToast('O carrossel aceita apenas imagens e vídeos.', 'warning');
+      } else {
+        revokeCarouselAttachmentUrls();
+        selectedCarouselFiles = files;
+        carouselPreviewIndex = 0;
+        handleMediaFile(files[0], { quiet: true });
+        renderCarouselAttachments();
+        showToast(`${files.length} mídias adicionadas ao carrossel.`, 'success');
+      }
+    } else if (files[0]) {
+      revokeCarouselAttachmentUrls();
+      selectedCarouselFiles = [];
+      carouselPreviewIndex = 0;
+      handleMediaFile(files[0]);
+      renderCarouselAttachments();
     }
     e.target.value = '';
+  });
+
+  carouselAttachmentsList.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-carousel-action]');
+    if (!button) return;
+    const item = button.closest('.carousel-attachment-item');
+    if (!item) return;
+    const fromIndex = Number(item.dataset.index);
+    if (button.dataset.carouselAction === 'remove') {
+      removeCarouselItem(fromIndex);
+      return;
+    }
+    const toIndex = fromIndex + (button.dataset.carouselAction === 'previous' ? -1 : 1);
+    moveCarouselItem(fromIndex, toIndex);
+  });
+
+  carouselAttachmentsList.addEventListener('dragstart', (event) => {
+    const item = event.target.closest('.carousel-attachment-item');
+    if (!item || !event.dataTransfer) return;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', item.dataset.index);
+    item.classList.add('is-dragging');
+  });
+
+  carouselAttachmentsList.addEventListener('dragover', (event) => {
+    const item = event.target.closest('.carousel-attachment-item');
+    if (!item || !event.dataTransfer) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    carouselAttachmentsList.querySelectorAll('.is-drop-target').forEach(target => target.classList.remove('is-drop-target'));
+    item.classList.add('is-drop-target');
+  });
+
+  carouselAttachmentsList.addEventListener('drop', (event) => {
+    if (!event.dataTransfer) return;
+    event.preventDefault();
+    const fromIndex = Number(event.dataTransfer.getData('text/plain'));
+    const item = event.target.closest('.carousel-attachment-item');
+    const targetIndex = item ? Number(item.dataset.index) : selectedCarouselFiles.length;
+    let toIndex = targetIndex;
+    if (item) {
+      const bounds = item.getBoundingClientRect();
+      if (event.clientX >= bounds.left + bounds.width / 2) toIndex += 1;
+    }
+    if (fromIndex < toIndex) toIndex -= 1;
+    toIndex = Math.max(0, Math.min(toIndex, selectedCarouselFiles.length - 1));
+    moveCarouselItem(fromIndex, toIndex);
+  });
+
+  carouselAttachmentsList.addEventListener('dragend', () => {
+    carouselAttachmentsList.querySelectorAll('.is-dragging, .is-drop-target').forEach(item => {
+      item.classList.remove('is-dragging', 'is-drop-target');
+    });
   });
 
   btnThumbOptions.addEventListener('click', (e) => {
@@ -392,6 +885,9 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // --- Video Playback Controls in Reel (Screenshot 3) ---
+  btnCarouselPrev.addEventListener('click', () => showCarouselPreviewAt(carouselPreviewIndex - 1));
+  btnCarouselNext.addEventListener('click', () => showCarouselPreviewAt(carouselPreviewIndex + 1));
+
   btnReelPlayPause.addEventListener('click', (e) => {
     e.stopPropagation();
     if (previewVideo.paused) {
@@ -669,19 +1165,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // --- Scheduled Posts Data Store ---
-  let scheduledPosts = [
-    {
-      id: 'post-3',
-      date: '2026-09-26',
-      time: '12:30',
-      type: 'post',
-      typeLabel: 'Post',
-      media: 'assets/avatar.jpg',
-      isVideo: false,
-      caption: 'Look especial do fim de semana ✨ Como está o dia de vocês?',
-      status: 'Agendado'
-    }
-  ];
+  let scheduledPosts = [];
 
   function updateScheduleBadge() {
     if (agendamentosCountBadge) {
@@ -698,16 +1182,36 @@ document.addEventListener('DOMContentLoaded', () => {
       published: 'Publicado',
       failed: 'Falhou'
     };
-    const isTrialReel = record.type === 'test_reel';
+    const typeLabels = {
+      post: 'POST',
+      carousel: 'CARROSSEL',
+      reel: 'REEL',
+      test_reel: 'REELS DE TESTE',
+      story: 'STORY'
+    };
+    const type = typeLabels[record.type] ? record.type : 'story';
+    const mediaFilenames = Array.isArray(record.media_filenames) && record.media_filenames.length > 0
+      ? record.media_filenames
+      : [record.media_filename];
+    const mediaKinds = Array.isArray(record.media_kinds) && record.media_kinds.length > 0
+      ? record.media_kinds
+      : [record.media_kind];
+    const mediaItems = mediaFilenames.filter(Boolean).map((filename, index) => ({
+      media: `/media/${encodeURIComponent(filename)}`,
+      isVideo: mediaKinds[index] === 'video'
+    }));
     return {
       id: record.id,
+      accountId: record.account_id || activeInstagramAccount?.id || '',
+      accountUsername: (record.account_username || activeInstagramAccount?.username || '').replace(/^@/, ''),
       date: hasValidDate ? scheduledAt.toLocaleDateString('sv-SE') : '—',
       time: hasValidDate ? scheduledAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—',
-      type: isTrialReel ? 'test_reel' : 'story',
-      typeLabel: isTrialReel ? 'REELS DE TESTE' : 'STORY',
-      media: `/media/${encodeURIComponent(record.media_filename)}`,
-      isVideo: record.media_kind === 'video',
-      caption: record.caption || '(Story sem legenda)',
+      type,
+      typeLabel: typeLabels[type],
+      media: mediaItems[0]?.media || '',
+      mediaItems,
+      isVideo: mediaItems[0]?.isVideo || false,
+      caption: record.caption || '(Sem legenda)',
       status: statusLabels[record.status] || record.status,
       backendStatus: record.status,
       graduationStrategy: record.graduation_strategy || 'MANUAL',
@@ -716,20 +1220,23 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   let backendSchedulesLoaded = false;
-  let scheduleSyncInFlight = false;
+  let scheduleLoadVersion = 0;
 
   async function loadSchedules() {
-    if (scheduleSyncInFlight) return;
-    scheduleSyncInFlight = true;
+    const accountId = activeInstagramAccount?.id;
+    if (!accountId) return;
+    const loadVersion = ++scheduleLoadVersion;
     try {
-      const response = await fetch('/api/schedules', {
+      const response = await fetch(accountScopedUrl('/api/schedules', accountId), {
         headers: { Accept: 'application/json' },
         cache: 'no-store'
       });
       if (!response.ok) return;
       const payload = await response.json();
+      if (loadVersion !== scheduleLoadVersion || activeInstagramAccount?.id !== accountId) return;
       if (Array.isArray(payload.schedules)) {
         const receivedPosts = payload.schedules.map(normalizeBackendSchedule);
+        const oldIds = new Set(scheduledPosts.map(post => post.id));
         if (!backendSchedulesLoaded) {
           scheduledPosts = receivedPosts;
           backendSchedulesLoaded = true;
@@ -739,31 +1246,20 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        const knownIds = new Set(scheduledPosts.map(post => post.id));
         const newScheduledPosts = receivedPosts.filter(post => (
-          post.backendStatus === 'scheduled' && !knownIds.has(post.id)
+          post.backendStatus === 'scheduled' && !oldIds.has(post.id)
         ));
-        if (newScheduledPosts.length === 0) return;
-
-        scheduledPosts = [...newScheduledPosts, ...scheduledPosts];
+        scheduledPosts = receivedPosts;
         updateScheduleBadge();
-        if (viewAgendamentos.classList.contains('active')) {
-          if (!calendarGridView.classList.contains('hidden')) {
-            newScheduledPosts.forEach(appendScheduleToCalendar);
-          }
-          if (!calendarListView.classList.contains('hidden')) {
-            appendScheduleRows(newScheduledPosts);
-          }
+        renderCalendar();
+        renderListView();
+        if (newScheduledPosts.length > 0) {
+          showToast(newScheduledPosts.length === 1
+            ? 'Novo agendamento recebido.'
+            : `${newScheduledPosts.length} novos agendamentos recebidos.`, 'info');
         }
-        showToast(newScheduledPosts.length === 1
-          ? 'Novo agendamento recebido.'
-          : `${newScheduledPosts.length} novos agendamentos recebidos.`, 'info');
       }
-    } catch (error) {
-      // The planner still opens in mock mode when the backend is not running.
-    } finally {
-      scheduleSyncInFlight = false;
-    }
+    } catch (_) {}
   }
 
   // --- Calendar Date State (September 2026) ---
@@ -905,6 +1401,9 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (post.type === 'post') {
       typeClass = 'type-pill-post';
       typeIcon = 'fa-table-cells';
+    } else if (post.type === 'carousel') {
+      typeClass = 'type-pill-carousel';
+      typeIcon = 'fa-images';
     } else if (post.type === 'story') {
       typeClass = 'type-pill-story';
       typeIcon = 'fa-circle-dot';
@@ -1141,7 +1640,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       if (post.scheduledAt) {
-        const response = await fetch(`/api/schedules/${encodeURIComponent(id)}`, {
+        const response = await fetch(accountScopedUrl(`/api/schedules/${encodeURIComponent(id)}`, post.accountId), {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ scheduled_at: scheduledAt.toISOString(), caption })
@@ -1171,6 +1670,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let typeClass = 'type-pill-reel';
     if (post.type === 'test_reel') typeClass = 'type-pill-test';
     else if (post.type === 'post') typeClass = 'type-pill-post';
+    else if (post.type === 'carousel') typeClass = 'type-pill-carousel';
     else if (post.type === 'story') typeClass = 'type-pill-story';
 
     const date = new Date(`${post.date}T${post.time}`);
@@ -1203,7 +1703,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <td>
         <div class="flex items-center gap-1.5">
           <i class="fa-brands fa-instagram text-pink-600 text-sm"></i>
-          <span class="text-xs font-semibold text-gray-800">alesantorooficial</span>
+          <span class="text-xs font-semibold text-gray-800">${escapeHtml(post.accountUsername || activeInstagramAccount?.username || '')}</span>
         </div>
       </td>
       <td>
@@ -1318,11 +1818,14 @@ document.addEventListener('DOMContentLoaded', () => {
       const caption = document.getElementById(`quickEditCaption-${id}`).value;
       await saveScheduleEdit(id, date, time, caption);
     } else if (button.classList.contains('btn-delete-post') && confirm('Deseja excluir este agendamento?')) {
-      if (id.startsWith('story-')) {
+      const post = scheduledPosts.find(item => item.id === id);
+      if (post?.scheduledAt) {
         try {
-          await fetch(`/api/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' });
+          const response = await fetch(accountScopedUrl(`/api/schedules/${encodeURIComponent(id)}`, post.accountId), { method: 'DELETE' });
+          if (!response.ok) throw new Error('delete_failed');
         } catch (error) {
           showToast('Não foi possível sincronizar a exclusão com o backend.', 'warning');
+          return;
         }
       }
       scheduledPosts = scheduledPosts.filter(post => post.id !== id);
@@ -1375,6 +1878,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const displayDate = new Date(`${localDateTime.date}T${localDateTime.time}`);
     modalDetailDateTime.innerText = `${displayDate.toLocaleDateString('pt-BR')} às ${localDateTime.time}`;
     modalDetailCaption.innerText = post.caption || '(Sem legenda)';
+    const modalAccount = document.getElementById('modalDetailAccountUsername');
+    if (modalAccount) modalAccount.textContent = post.accountUsername || activeInstagramAccount?.username || 'Instagram';
     setPostDetailEditing(false);
 
     if (post.isVideo) {
@@ -1449,13 +1954,15 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function openUploadProgress(file, action, contentLabel) {
+    const files = Array.isArray(file) ? file : [file];
+    const totalBytes = files.reduce((total, item) => total + (item?.size || 0), 0);
     const actionLabel = action === 'publish_now' ? 'publicação' : 'agendamento';
     uploadProgressCard.classList.remove('is-processing', 'is-complete', 'is-indeterminate');
     uploadProgressTitle.innerText = `Enviando ${contentLabel}`;
     uploadProgressStatus.innerText = `Enviando o arquivo para ${actionLabel}…`;
     uploadProgressPhase.innerText = 'ENVIO';
-    uploadProgressFileName.innerText = file.name;
-    uploadProgressFileSize.innerText = formatUploadBytes(file.size);
+    uploadProgressFileName.innerText = files.length > 1 ? `${files.length} mídias` : (files[0]?.name || contentLabel);
+    uploadProgressFileSize.innerText = formatUploadBytes(totalBytes);
     uploadProgressTransferred.innerText = 'Aguardando dados';
     setUploadProgress(0);
     uploadProgressOverlay.hidden = false;
@@ -1538,6 +2045,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function submitStoryToBackend() {
+    const accountId = activeInstagramAccount?.id;
+    if (!accountId) {
+      showToast('Conecte uma conta do Instagram antes de publicar.', 'warning');
+      return;
+    }
     if (!currentMedia) {
       showToast('Selecione uma imagem JPG ou vídeo MP4 para o Story.', 'warning');
       return;
@@ -1545,6 +2057,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const action = selectedPublishAction;
     const formData = new FormData();
+    formData.append('account_id', accountId);
     formData.append('action', action);
     formData.append('caption', editor.innerText.trim());
     if (action === 'schedule') {
@@ -1559,11 +2072,14 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const payload = await uploadFormDataWithProgress('/api/stories', formData, currentMedia.file, action, 'Story');
       const story = payload.story;
-      scheduledPosts.unshift(normalizeBackendSchedule(story));
-      updateScheduleBadge();
-      renderCalendar();
-      renderListView();
-      const successMessage = action === 'publish_now' ? 'Story publicado com sucesso.' : 'Story agendado com sucesso.';
+      if (activeInstagramAccount?.id === accountId) {
+        scheduledPosts.unshift(normalizeBackendSchedule(story));
+        updateScheduleBadge();
+        renderCalendar();
+        renderListView();
+      }
+      const accountName = connectedAccounts.find(account => account.id === accountId)?.username || 'conta selecionada';
+      const successMessage = action === 'publish_now' ? `Story publicado em @${accountName}.` : `Story agendado para @${accountName}.`;
       completeUploadProgress(successMessage);
       showToast(successMessage, 'success');
       await waitForUploadCompletion();
@@ -1577,6 +2093,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function submitTrialReelToBackend() {
+    const accountId = activeInstagramAccount?.id;
+    if (!accountId) {
+      showToast('Conecte uma conta do Instagram antes de publicar.', 'warning');
+      return;
+    }
     if (!currentMedia || !currentMedia.isVideo) {
       showToast('Selecione o vídeo MP4 do Reel de teste.', 'warning');
       return;
@@ -1584,8 +2105,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const action = selectedPublishAction;
     const formData = new FormData();
+    formData.append('account_id', accountId);
     formData.append('action', action);
     formData.append('caption', editor.innerText.trim());
+    formData.append('publication_type', 'test_reel');
     formData.append('graduation_strategy', 'MANUAL');
     if (action === 'schedule') {
       const date = document.getElementById('scheduledDateInput').value;
@@ -1598,15 +2121,160 @@ document.addEventListener('DOMContentLoaded', () => {
     btnScheduleDropdown.disabled = true;
     try {
       const payload = await uploadFormDataWithProgress('/api/reels', formData, currentMedia.file, action, 'Reel de teste');
-      scheduledPosts.unshift(normalizeBackendSchedule(payload.story));
-      updateScheduleBadge();
-      renderCalendar();
-      renderListView();
+      if (activeInstagramAccount?.id === accountId) {
+        scheduledPosts.unshift(normalizeBackendSchedule(payload.story));
+        updateScheduleBadge();
+        renderCalendar();
+        renderListView();
+      }
+      const accountName = connectedAccounts.find(account => account.id === accountId)?.username || 'conta selecionada';
       const successMessage = action === 'publish_now'
-        ? 'Reel de teste publicado com sucesso.'
-        : 'Reel de teste agendado com sucesso.';
+        ? `Reel de teste publicado em @${accountName}.`
+        : `Reel de teste agendado para @${accountName}.`;
       completeUploadProgress(successMessage);
       showToast(successMessage, 'success');
+      await waitForUploadCompletion();
+    } catch (error) {
+      showToast(error.message || 'Não foi possível conectar ao backend.', 'warning');
+    } finally {
+      btnSchedule.disabled = false;
+      btnScheduleDropdown.disabled = false;
+      closeUploadProgress();
+    }
+  }
+
+  async function submitFeedPostToBackend() {
+    const accountId = activeInstagramAccount?.id;
+    if (!accountId) {
+      showToast('Conecte uma conta do Instagram antes de publicar.', 'warning');
+      return;
+    }
+    if (!currentMedia || currentMedia.isVideo) {
+      showToast('No modo Post, selecione uma foto. Para vídeo, escolha Reel ou Reel de teste.', 'warning');
+      return;
+    }
+    const action = selectedPublishAction;
+    const formData = new FormData();
+    formData.append('account_id', accountId);
+    formData.append('action', action);
+    formData.append('caption', editor.innerText.trim());
+    if (action === 'schedule') {
+      const date = document.getElementById('scheduledDateInput').value;
+      const time = document.getElementById('scheduledTimeInput').value;
+      formData.append('scheduled_at', new Date(`${date}T${time}`).toISOString());
+    }
+    formData.append('media', currentMedia.file, currentMedia.file.name);
+    btnSchedule.disabled = true;
+    btnScheduleDropdown.disabled = true;
+    try {
+      const payload = await uploadFormDataWithProgress('/api/posts', formData, currentMedia.file, action, 'Post');
+      if (activeInstagramAccount?.id === accountId) {
+        scheduledPosts.unshift(normalizeBackendSchedule(payload.story));
+        updateScheduleBadge();
+        renderCalendar();
+        renderListView();
+      }
+      const username = connectedAccounts.find(account => account.id === accountId)?.username || 'conta selecionada';
+      const message = action === 'publish_now' ? `Post publicado em @${username}.` : `Post agendado para @${username}.`;
+      completeUploadProgress(message);
+      showToast(message, 'success');
+      await waitForUploadCompletion();
+    } catch (error) {
+      showToast(error.message || 'Não foi possível conectar ao backend.', 'warning');
+    } finally {
+      btnSchedule.disabled = false;
+      btnScheduleDropdown.disabled = false;
+      closeUploadProgress();
+    }
+  }
+
+  async function submitFeedReelToBackend() {
+    const accountId = activeInstagramAccount?.id;
+    if (!accountId) {
+      showToast('Conecte uma conta do Instagram antes de publicar.', 'warning');
+      return;
+    }
+    if (!currentMedia?.isVideo) {
+      showToast('Selecione um vídeo MP4 para o Reel.', 'warning');
+      return;
+    }
+    const action = selectedPublishAction;
+    const formData = new FormData();
+    formData.append('account_id', accountId);
+    formData.append('action', action);
+    formData.append('publication_type', 'reel');
+    formData.append('caption', editor.innerText.trim());
+    if (action === 'schedule') {
+      const date = document.getElementById('scheduledDateInput').value;
+      const time = document.getElementById('scheduledTimeInput').value;
+      formData.append('scheduled_at', new Date(`${date}T${time}`).toISOString());
+    }
+    formData.append('media', currentMedia.file, currentMedia.file.name);
+    btnSchedule.disabled = true;
+    btnScheduleDropdown.disabled = true;
+    try {
+      const payload = await uploadFormDataWithProgress('/api/reels', formData, currentMedia.file, action, 'Reel');
+      if (activeInstagramAccount?.id === accountId) {
+        scheduledPosts.unshift(normalizeBackendSchedule(payload.story));
+        updateScheduleBadge();
+        renderCalendar();
+        renderListView();
+      }
+      const username = connectedAccounts.find(account => account.id === accountId)?.username || 'conta selecionada';
+      const message = action === 'publish_now' ? `Reel publicado em @${username}.` : `Reel agendado para @${username}.`;
+      completeUploadProgress(message);
+      showToast(message, 'success');
+      await waitForUploadCompletion();
+    } catch (error) {
+      showToast(error.message || 'Não foi possível conectar ao backend.', 'warning');
+    } finally {
+      btnSchedule.disabled = false;
+      btnScheduleDropdown.disabled = false;
+      closeUploadProgress();
+    }
+  }
+
+  async function submitCarouselToBackend() {
+    const accountId = activeInstagramAccount?.id;
+    if (!accountId) {
+      showToast('Conecte uma conta do Instagram antes de publicar.', 'warning');
+      return;
+    }
+    if (selectedCarouselFiles.length < 2 || selectedCarouselFiles.length > 10) {
+      showToast('Selecione de 2 a 10 mídias para o carrossel.', 'warning');
+      return;
+    }
+    if (selectedCarouselFiles.some(file => !file.type.startsWith('image/') && !file.type.startsWith('video/'))) {
+      showToast('O carrossel aceita apenas imagens e vídeos.', 'warning');
+      return;
+    }
+
+    const action = selectedPublishAction;
+    const formData = new FormData();
+    formData.append('account_id', accountId);
+    formData.append('action', action);
+    formData.append('caption', editor.innerText.trim());
+    if (action === 'schedule') {
+      const date = document.getElementById('scheduledDateInput').value;
+      const time = document.getElementById('scheduledTimeInput').value;
+      formData.append('scheduled_at', new Date(`${date}T${time}`).toISOString());
+    }
+    selectedCarouselFiles.forEach(file => formData.append('media', file, file.name));
+
+    btnSchedule.disabled = true;
+    btnScheduleDropdown.disabled = true;
+    try {
+      const payload = await uploadFormDataWithProgress('/api/carousels', formData, selectedCarouselFiles, action, 'Carrossel');
+      if (activeInstagramAccount?.id === accountId) {
+        scheduledPosts.unshift(normalizeBackendSchedule(payload.story));
+        updateScheduleBadge();
+        renderCalendar();
+        renderListView();
+      }
+      const username = connectedAccounts.find(account => account.id === accountId)?.username || 'conta selecionada';
+      const message = action === 'publish_now' ? `Carrossel publicado em @${username}.` : `Carrossel agendado para @${username}.`;
+      completeUploadProgress(message);
+      showToast(message, 'success');
       await waitForUploadCompletion();
     } catch (error) {
       showToast(error.message || 'Não foi possível conectar ao backend.', 'warning');
@@ -1628,6 +2296,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (currentMode === 'test_reel') {
       await submitTrialReelToBackend();
+      return;
+    }
+    if (currentMode === 'post') {
+      await submitFeedPostToBackend();
+      return;
+    }
+    if (currentMode === 'carousel') {
+      await submitCarouselToBackend();
+      return;
+    }
+    if (currentMode === 'reel') {
+      await submitFeedReelToBackend();
       return;
     }
 
@@ -1660,7 +2340,7 @@ document.addEventListener('DOMContentLoaded', () => {
   updateScheduleBadge();
   renderCalendar();
   renderListView();
-  loadSchedules();
+  loadConnectedAccounts();
   window.setInterval(() => {
     if (document.visibilityState === 'visible') loadSchedules();
   }, 30000);
