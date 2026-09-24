@@ -20,7 +20,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   
   <!-- Application Styles -->
-  <link rel="stylesheet" href="css/styles.css?v=carousel-remove-20260924">
+  <link rel="stylesheet" href="css/styles.css?v=post-crop-tabs-20260924-2">
   <link rel="stylesheet" href="css/analises.css?v=reel-performance-layout-20260924">
 </head>
 <body>
@@ -551,6 +551,24 @@
                 </div>
               </div>
 
+            </div>
+          </div>
+
+          <div class="post-crop-controls" id="postCropControls" role="group" aria-label="Formato da foto do post" hidden>
+            <div class="post-crop-controls-copy">
+              <span class="post-crop-controls-label">Enquadramento</span>
+              <span class="post-crop-help" id="postCropHelp">Arraste para ajustar</span>
+            </div>
+            <div class="post-crop-ratio-options" aria-label="Proporção da foto">
+              <button type="button" class="post-crop-ratio-btn active" data-post-crop-ratio="portrait" aria-pressed="true">
+                <span class="post-crop-ratio-icon" aria-hidden="true"></span><span>4:5</span>
+              </button>
+              <button type="button" class="post-crop-ratio-btn" data-post-crop-ratio="square" aria-pressed="false">
+                <span class="post-crop-ratio-icon" aria-hidden="true"></span><span>1:1</span>
+              </button>
+              <button type="button" class="post-crop-ratio-btn" data-post-crop-ratio="original" aria-pressed="false">
+                <span class="post-crop-ratio-icon" aria-hidden="true"></span><span>Original</span>
+              </button>
             </div>
           </div>
 
@@ -1134,6 +1152,6 @@
 
   <!-- Application Logic -->
   <script src="js/analises.js?v=reel-grid-layout-20260924"></script>
-  <script src="js/app.js?v=carousel-remove-20260924"></script>
+  <script src="js/app.js?v=post-image-crop-20260924"></script>
 </body>
 </html>

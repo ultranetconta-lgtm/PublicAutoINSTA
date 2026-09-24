@@ -246,6 +246,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   const previewMediaLayer = document.getElementById('previewMediaLayer');
+  const previewMockupStage = document.querySelector('.preview-mockup-stage');
+  const postCropControls = document.getElementById('postCropControls');
+  const postCropRatioButtons = Array.from(document.querySelectorAll('[data-post-crop-ratio]'));
   const mediaEmptyPlaceholder = document.getElementById('mediaEmptyPlaceholder');
   const previewImage = document.getElementById('previewImage');
   const previewVideo = document.getElementById('previewVideo');
@@ -269,10 +272,140 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentMode = 'reel';
   let selectedPublishAction = 'schedule';
   let currentMedia = null;
+  let postCropState = { ratio: 'portrait', positionX: 50, positionY: 50 };
+  let postCropDrag = null;
   let selectedCarouselFiles = [];
   let carouselPreviewIndex = 0;
   const carouselAttachmentUrls = new Map();
   networkBadgeIcon.classList.add('hidden');
+
+  const postCropAspectRatios = { portrait: 4 / 5, square: 1 };
+
+  function selectedPostCropAspectRatio() {
+    if (postCropState.ratio === 'original') {
+      const sourceWidth = previewImage.naturalWidth;
+      const sourceHeight = previewImage.naturalHeight;
+      return sourceWidth > 0 && sourceHeight > 0 ? sourceWidth / sourceHeight : null;
+    }
+    return postCropAspectRatios[postCropState.ratio] || postCropAspectRatios.portrait;
+  }
+
+  function updatePostCropControls() {
+    const visible = currentMode === 'post' && currentMedia?.kind === 'image';
+    postCropControls.hidden = !visible;
+    previewMockupStage.classList.toggle('has-post-crop-controls', visible);
+    postCropRatioButtons.forEach(button => {
+      const selected = button.dataset.postCropRatio === postCropState.ratio;
+      button.classList.toggle('active', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
+  }
+
+  function applyPostCropPreview() {
+    updatePostCropControls();
+    const active = currentMode === 'post'
+      && currentMedia?.kind === 'image'
+      && !previewImage.classList.contains('hidden');
+    previewImage.classList.toggle('post-crop-active', active);
+    if (!active) {
+      previewImage.classList.remove('is-dragging');
+      previewImage.style.width = '';
+      previewImage.style.height = '';
+      previewImage.style.left = '';
+      previewImage.style.top = '';
+      previewImage.style.transform = '';
+      previewImage.style.objectPosition = '';
+      postCropDrag = null;
+      return;
+    }
+
+    const aspectRatio = selectedPostCropAspectRatio();
+    const layerWidth = previewMediaLayer.clientWidth;
+    const layerHeight = previewMediaLayer.clientHeight;
+    if (!aspectRatio || layerWidth <= 0 || layerHeight <= 0) return;
+
+    const frameWidth = Math.min(layerWidth, layerHeight * aspectRatio);
+    const frameHeight = frameWidth / aspectRatio;
+    previewImage.style.width = `${frameWidth}px`;
+    previewImage.style.height = `${frameHeight}px`;
+    previewImage.style.left = '50%';
+    previewImage.style.top = '50%';
+    previewImage.style.transform = 'translate(-50%, -50%)';
+    previewImage.style.objectPosition = `${postCropState.positionX}% ${postCropState.positionY}%`;
+  }
+
+  function resetPostCropState() {
+    postCropState = { ratio: 'portrait', positionX: 50, positionY: 50 };
+    updatePostCropControls();
+  }
+
+  function postCropOverflow() {
+    const frameWidth = previewImage.clientWidth;
+    const frameHeight = previewImage.clientHeight;
+    const sourceWidth = previewImage.naturalWidth;
+    const sourceHeight = previewImage.naturalHeight;
+    if (!frameWidth || !frameHeight || !sourceWidth || !sourceHeight) {
+      return { x: 0, y: 0 };
+    }
+    const scale = Math.max(frameWidth / sourceWidth, frameHeight / sourceHeight);
+    return {
+      x: Math.max(0, sourceWidth * scale - frameWidth),
+      y: Math.max(0, sourceHeight * scale - frameHeight)
+    };
+  }
+
+  function clampCropPosition(value) {
+    return Math.max(0, Math.min(100, value));
+  }
+
+  postCropRatioButtons.forEach(button => {
+    button.addEventListener('click', () => {
+      postCropState.ratio = button.dataset.postCropRatio;
+      postCropState.positionX = 50;
+      postCropState.positionY = 50;
+      applyPostCropPreview();
+    });
+  });
+
+  previewImage.addEventListener('load', applyPostCropPreview);
+  previewImage.addEventListener('pointerdown', event => {
+    if (!previewImage.classList.contains('post-crop-active') || (event.pointerType === 'mouse' && event.button !== 0)) return;
+    const overflow = postCropOverflow();
+    if (overflow.x <= 0 && overflow.y <= 0) return;
+    event.preventDefault();
+    postCropDrag = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      positionX: postCropState.positionX,
+      positionY: postCropState.positionY,
+      overflow
+    };
+    previewImage.setPointerCapture(event.pointerId);
+    previewImage.classList.add('is-dragging');
+  });
+  previewImage.addEventListener('pointermove', event => {
+    if (!postCropDrag || event.pointerId !== postCropDrag.pointerId) return;
+    if (postCropDrag.overflow.x > 0) {
+      postCropState.positionX = clampCropPosition(
+        postCropDrag.positionX - ((event.clientX - postCropDrag.startX) / postCropDrag.overflow.x) * 100
+      );
+    }
+    if (postCropDrag.overflow.y > 0) {
+      postCropState.positionY = clampCropPosition(
+        postCropDrag.positionY - ((event.clientY - postCropDrag.startY) / postCropDrag.overflow.y) * 100
+      );
+    }
+    previewImage.style.objectPosition = `${postCropState.positionX}% ${postCropState.positionY}%`;
+  });
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(eventName => {
+    previewImage.addEventListener(eventName, event => {
+      if (!postCropDrag || event.pointerId !== postCropDrag.pointerId) return;
+      postCropDrag = null;
+      previewImage.classList.remove('is-dragging');
+    });
+  });
+  window.addEventListener('resize', applyPostCropPreview);
 
   // Hashtags autocomplete elements
   const btnHashtag = document.getElementById('btnHashtag');
@@ -389,6 +522,7 @@ document.addEventListener('DOMContentLoaded', () => {
               ? 'Feed'
               : 'Reels';
       }
+      applyPostCropPreview();
 
       // If "Reels de teste", show warning accordion; otherwise hide it
       if (mode === 'test_reel') {
@@ -447,6 +581,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (currentMedia?.url) URL.revokeObjectURL(currentMedia.url);
+    resetPostCropState();
     const fileUrl = URL.createObjectURL(file);
     currentMedia = {
       file,
@@ -488,6 +623,8 @@ document.addEventListener('DOMContentLoaded', () => {
       previewImage.style.display = 'block';
       videoControlsOverlay.classList.add('hidden');
     }
+
+    applyPostCropPreview();
 
     if (!quiet) showToast(isVideo ? 'Vídeo carregado com sucesso!' : 'Imagem carregada com sucesso!', 'success');
   }
@@ -660,6 +797,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (currentMedia?.url) URL.revokeObjectURL(currentMedia.url);
     revokeCarouselAttachmentUrls();
     currentMedia = null;
+    resetPostCropState();
     selectedCarouselFiles = [];
     carouselPreviewIndex = 0;
     updateCarouselSelectionHint();
@@ -682,6 +820,7 @@ document.addEventListener('DOMContentLoaded', () => {
     previewImage.removeAttribute('src');
     previewImage.style.display = 'none';
     previewImage.classList.add('hidden');
+    applyPostCropPreview();
     mediaEmptyPlaceholder.classList.remove('hidden');
     videoControlsOverlay.classList.add('hidden');
     reelPlayIcon.className = 'fa-solid fa-play ml-1';
@@ -2143,6 +2282,57 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  async function createPostUploadFile(file, cropState) {
+    if (cropState.ratio === 'original') return file;
+
+    let source;
+    try {
+      source = await createImageBitmap(file);
+    } catch (_) {
+      throw new Error('Não foi possível preparar o recorte desta imagem no navegador.');
+    }
+
+    try {
+      const targetRatio = postCropAspectRatios[cropState.ratio];
+      if (!targetRatio) return file;
+
+      const sourceRatio = source.width / source.height;
+      const cropWidth = sourceRatio > targetRatio ? source.height * targetRatio : source.width;
+      const cropHeight = sourceRatio > targetRatio ? source.height : source.width / targetRatio;
+      const cropX = (source.width - cropWidth) * (clampCropPosition(cropState.positionX) / 100);
+      const cropY = (source.height - cropHeight) * (clampCropPosition(cropState.positionY) / 100);
+      const resize = Math.min(1, 8192 / Math.max(cropWidth, cropHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(cropWidth * resize));
+      canvas.height = Math.max(1, Math.round(cropHeight * resize));
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Não foi possível preparar o recorte desta imagem no navegador.');
+
+      const outputType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+      if (outputType === 'image/jpeg') {
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+      }
+      context.drawImage(
+        source,
+        cropX, cropY, cropWidth, cropHeight,
+        0, 0, canvas.width, canvas.height
+      );
+
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, outputType, 0.94));
+      if (!blob) throw new Error('Não foi possível exportar o recorte desta imagem.');
+      const extension = blob.type === 'image/png' ? 'png' : 'jpg';
+      const baseName = file.name.replace(/\.[^.]+$/, '') || 'post';
+      const ratioLabel = cropState.ratio === 'square' ? '1x1' : '4x5';
+      return new File([blob], `${baseName}-${ratioLabel}.${extension}`, {
+        type: blob.type,
+        lastModified: file.lastModified
+      });
+    } finally {
+      source.close?.();
+    }
+  }
+
   async function submitFeedPostToBackend() {
     const accountId = activeInstagramAccount?.id;
     if (!accountId) {
@@ -2154,6 +2344,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     const action = selectedPublishAction;
+    const cropSnapshot = { ...postCropState };
     const formData = new FormData();
     formData.append('account_id', accountId);
     formData.append('action', action);
@@ -2163,11 +2354,19 @@ document.addEventListener('DOMContentLoaded', () => {
       const time = document.getElementById('scheduledTimeInput').value;
       formData.append('scheduled_at', new Date(`${date}T${time}`).toISOString());
     }
-    formData.append('media', currentMedia.file, currentMedia.file.name);
     btnSchedule.disabled = true;
     btnScheduleDropdown.disabled = true;
+    postCropRatioButtons.forEach(button => { button.disabled = true; });
     try {
-      const payload = await uploadFormDataWithProgress('/api/posts', formData, currentMedia.file, action, 'Post');
+      if (cropSnapshot.ratio !== 'original') {
+        openUploadProgress(currentMedia.file, action, 'Post');
+        uploadProgressStatus.innerText = 'Preparando o recorte da imagem…';
+        uploadProgressPhase.innerText = 'RECORTE';
+        setUploadProgress(null);
+      }
+      const uploadFile = await createPostUploadFile(currentMedia.file, cropSnapshot);
+      formData.append('media', uploadFile, uploadFile.name);
+      const payload = await uploadFormDataWithProgress('/api/posts', formData, uploadFile, action, 'Post');
       if (activeInstagramAccount?.id === accountId) {
         scheduledPosts.unshift(normalizeBackendSchedule(payload.story));
         updateScheduleBadge();
@@ -2184,6 +2383,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } finally {
       btnSchedule.disabled = false;
       btnScheduleDropdown.disabled = false;
+      postCropRatioButtons.forEach(button => { button.disabled = false; });
       closeUploadProgress();
     }
   }
