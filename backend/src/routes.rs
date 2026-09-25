@@ -25,6 +25,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/schedules", get(list_schedules))
         .route("/api/analytics", get(analytics))
         .route("/api/comments", get(comments))
+        .route("/api/comments/{comment_id}/reply", post(reply_to_comment))
         .route("/api/plugin/health", get(plugin_health))
         .route("/api/plugin/summary", get(plugin_summary))
         .route("/api/posts", post(create_post))
@@ -323,6 +324,62 @@ async fn comments(State(state): State<AppState>, Query(query): Query<CommentsQue
         ),
     }
 }
+
+#[derive(Deserialize)]
+struct CommentReplyRequest {
+    account_id: String,
+    message: String,
+}
+
+async fn reply_to_comment(
+    State(state): State<AppState>,
+    Path(comment_id): Path<String>,
+    Json(payload): Json<CommentReplyRequest>,
+) -> Response {
+    let account_id = payload.account_id.trim();
+    let message = payload.message.trim();
+    if account_id.is_empty() {
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            json!({"ok": false, "error": "instagram_account_required", "message": "Selecione uma conta do Instagram."}),
+        );
+    }
+    if comment_id.is_empty()
+        || comment_id.len() > 128
+        || !comment_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            json!({"ok": false, "error": "invalid_comment_id", "message": "O identificador deste comentário é inválido."}),
+        );
+    }
+    if message.is_empty() || message.chars().count() > 2200 {
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            json!({"ok": false, "error": "invalid_comment_reply", "message": "Escreva uma resposta com até 2.200 caracteres."}),
+        );
+    }
+    let account = match state.resolve_account(Some(account_id)).await {
+        Ok(account) => account,
+        Err(error) => return workflow_error(error),
+    };
+    let Some(service) = state.service_for_account(&account.id).await else {
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            json!({"ok": false, "error": "instagram_account_not_found", "message": "A conta selecionada não está conectada neste planejador."}),
+        );
+    };
+    match service.reply_to_comment(&comment_id, message).await {
+        Ok(reply) => json_response(StatusCode::OK, json!({"ok": true, "reply": reply})),
+        Err(error) => json_response(
+            StatusCode::BAD_GATEWAY,
+            json!({"ok": false, "error": "instagram_comment_reply_failed", "message": error.message}),
+        ),
+    }
+}
+
 
 async fn create_story(State(state): State<AppState>, request: Request<Body>) -> Response {
     create_publication(state, request, PublicationEndpoint::Story).await

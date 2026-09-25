@@ -26,6 +26,24 @@
         this.updateFilterButton();
         this.render();
       });
+      document.getElementById('commentsList')?.addEventListener('submit', event => {
+        const form = event.target.closest('.comentario-reply-form');
+        if (!form) return;
+        event.preventDefault();
+        this.sendReply(form);
+      });
+      document.getElementById('commentsList')?.addEventListener('click', event => {
+        const pickerButton = event.target.closest('.comentario-emoji-toggle');
+        if (pickerButton) {
+          const picker = pickerButton.closest('.comentario-reply-composer')?.querySelector('.comentario-emoji-picker');
+          if (!picker) return;
+          picker.hidden = !picker.hidden;
+          pickerButton.setAttribute('aria-expanded', String(!picker.hidden));
+          return;
+        }
+        const emojiButton = event.target.closest('.comentario-emoji-option');
+        if (emojiButton) this.insertEmoji(emojiButton);
+      });
       document.addEventListener('instagram-account-changed', () => {
         if (document.getElementById('viewComentarios')?.classList.contains('active')) this.load();
       });
@@ -111,12 +129,78 @@
       }
     },
 
+    async sendReply(form) {
+      const input = form.querySelector('input[name="message"]');
+      const button = form.querySelector('button[type="submit"]');
+      const feedback = form.querySelector('.comentario-reply-status');
+      const message = input?.value.trim() || '';
+      const commentId = form.dataset.commentId || '';
+      const accountId = this.account?.id || window.getActiveInstagramAccountId?.() || '';
+      if (!message) {
+        if (feedback) feedback.textContent = 'Escreva uma resposta antes de enviar.';
+        input?.focus();
+        return;
+      }
+      if (!accountId || !commentId) {
+        if (feedback) feedback.textContent = 'Não foi possível identificar a conta ou o comentário.';
+        return;
+      }
+
+      if (button) button.disabled = true;
+      if (input) input.disabled = true;
+      if (feedback) feedback.textContent = 'Enviando resposta para o Instagram…';
+      try {
+        const response = await fetch(`/api/comments/${encodeURIComponent(commentId)}/reply`, {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          cache: 'no-store',
+          body: JSON.stringify({ account_id: accountId, message })
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.ok !== true) {
+          throw new Error(payload.message || 'Não foi possível enviar a resposta.');
+        }
+        const row = this.flattenComments().find(item => String(item.comment.id || '') === commentId);
+        if (row) {
+          const returnedReply = payload.reply && typeof payload.reply === 'object' ? payload.reply : {};
+          row.replies.push({
+            ...returnedReply,
+            text: returnedReply.text || message,
+            username: returnedReply.username || this.account?.username || '',
+            timestamp: returnedReply.timestamp || new Date().toISOString()
+          });
+          row.answered = true;
+          row.comment.replies = { data: row.replies };
+          this.render();
+          this.updateBadge(this.flattenComments().filter(item => !item.answered).length);
+        }
+        if (input) input.value = '';
+        const status = document.getElementById('commentsStatus');
+        if (status) status.textContent = `${status.textContent} Última resposta enviada no Instagram.`.trim();
+      } catch (error) {
+        if (feedback) feedback.textContent = error.message || 'Falha ao enviar resposta.';
+      } finally {
+        if (button?.isConnected) button.disabled = false;
+        if (input?.isConnected) input.disabled = false;
+      }
+    },
+
     flattenComments() {
       const rows = [];
+      const nestedReplyIds = new Set();
       for (const post of this.posts) {
         for (const comment of Array.isArray(post.comments) ? post.comments : []) {
           const replies = Array.isArray(comment.replies?.data) ? comment.replies.data : (Array.isArray(comment.replies) ? comment.replies : []);
-          rows.push({ post, comment, replies, answered: replies.some(reply => this.isFromActiveAccount(reply)) });
+          for (const reply of replies) {
+            if (reply.id) nestedReplyIds.add(String(reply.id));
+          }
+        }
+      }
+      for (const post of this.posts) {
+        for (const comment of Array.isArray(post.comments) ? post.comments : []) {
+          if (comment.id && nestedReplyIds.has(String(comment.id))) continue;
+          const replies = Array.isArray(comment.replies?.data) ? comment.replies.data : (Array.isArray(comment.replies) ? comment.replies : []);
+          rows.push({ post, comment, replies, answered: replies.length > 0 });
         }
       }
       return rows.sort((left, right) => this.timestamp(right.comment) - this.timestamp(left.comment));
@@ -132,6 +216,23 @@
     timestamp(item) {
       const value = item?.timestamp ? Date.parse(item.timestamp) : 0;
       return Number.isFinite(value) ? value : 0;
+    },
+
+    insertEmoji(button) {
+      const form = button.closest('.comentario-reply-form');
+      const input = form?.querySelector('input[name="message"]');
+      const picker = button.closest('.comentario-emoji-picker');
+      if (!input || !picker) return;
+      const emoji = button.dataset.emoji || '';
+      const start = input.selectionStart ?? input.value.length;
+      const end = input.selectionEnd ?? start;
+      const value = input.value;
+      input.value = `${value.slice(0, start)}${emoji}${value.slice(end)}`.slice(0, Number(input.maxLength) || undefined);
+      const caret = Math.min(start + emoji.length, input.value.length);
+      input.setSelectionRange(caret, caret);
+      input.focus();
+      picker.hidden = true;
+      form.querySelector('.comentario-emoji-toggle')?.setAttribute('aria-expanded', 'false');
     },
 
     render() {
@@ -177,6 +278,22 @@
             ${mediaLink ? '<i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>' : ''}
           </a>
         </div>`;
+      const replyForm = document.createElement('form');
+      replyForm.className = 'comentario-reply-form';
+      replyForm.dataset.commentId = String(comment.id || '');
+      replyForm.innerHTML = `
+        <div class="comentario-reply-composer">
+          <input type="text" name="message" maxlength="2200" required aria-label="Resposta para este comentário" placeholder="Escreva sua resposta...">
+          <button class="comentario-emoji-toggle" type="button" aria-label="Escolher emoji" aria-expanded="false" title="Escolher emoji"><i class="fa-regular fa-face-smile" aria-hidden="true"></i></button>
+          <div class="comentario-emoji-picker" hidden aria-label="Emojis">
+            ${['😀', '😂', '🥰', '😍', '😘', '😊', '❤️', '👏', '✨', '🙏', '🔥', '💖'].map(emoji => `<button class="comentario-emoji-option" type="button" data-emoji="${emoji}" aria-label="Inserir ${emoji}">${emoji}</button>`).join('')}
+          </div>
+        </div>
+        <div class="comentario-reply-actions">
+          <span class="comentario-reply-status" role="status" aria-live="polite"></span>
+          <button type="submit"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i><span>Enviar resposta</span></button>
+        </div>`;
+      card.appendChild(replyForm);
       return card;
     },
 

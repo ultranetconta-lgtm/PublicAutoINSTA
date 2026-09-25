@@ -556,6 +556,32 @@ impl MetaClient {
         Ok(posts)
     }
 
+    pub async fn reply_to_comment(
+        &self,
+        comment_id: &str,
+        message: &str,
+    ) -> Result<Value, MetaError> {
+        let comment_id = comment_id.trim();
+        if comment_id.is_empty()
+            || comment_id.len() > 128
+            || !comment_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        {
+            return Err(MetaError::new("invalid Instagram comment ID"));
+        }
+        let message = message.trim();
+        if message.is_empty() || message.chars().count() > 2200 {
+            return Err(MetaError::new(
+                "Instagram comment reply must contain 1 to 2200 characters",
+            ));
+        }
+        let endpoint = format!("{}/replies", self.container_endpoint(comment_id));
+        let data = [("message", message.to_string())];
+        self.request_json(Method::POST, &endpoint, Some(&data))
+            .await
+    }
+
     pub async fn probe_media_comments(
         &self,
         requested_media_id: Option<&str>,
