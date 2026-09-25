@@ -127,6 +127,18 @@ html, body {
   object-fit: cover;
 }
 
+.account-avatar-fallback {
+  display: inline-flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .brand-pill__name {
   font-size: 13.5px;
   font-weight: 700;
@@ -168,6 +180,7 @@ html, body {
 .account-menu-item.active { background: #eff6ff; color: #075985; }
 .account-menu-item .account-menu-check { margin-left: auto; color: #0284c7; }
 .account-menu-avatar { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 28px; width: 28px; height: 28px; border-radius: 50%; background: #fce7f3; color: #db2777; font-size: 12px; }
+.account-menu-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
 .account-menu-username { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 650; }
 .account-menu-empty { padding: 10px; color: #64748b; font-size: 12px; line-height: 1.5; }
 .account-menu-divider { height: 1px; margin: 7px 2px; background: #e2e8f0; }

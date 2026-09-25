@@ -21,8 +21,12 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .route("/api/accounts", get(list_accounts).post(connect_account))
+        .route("/api/account-profile", get(account_profile))
         .route("/api/schedules", get(list_schedules))
         .route("/api/analytics", get(analytics))
+        .route("/api/comments", get(comments))
+        .route("/api/plugin/health", get(plugin_health))
+        .route("/api/plugin/summary", get(plugin_summary))
         .route("/api/posts", post(create_post))
         .route("/api/carousels", post(create_carousel))
         .route("/api/stories", post(create_story))
@@ -55,6 +59,30 @@ async fn list_accounts(State(state): State<AppState>) -> Response {
     }
 }
 
+async fn account_profile(
+    State(state): State<AppState>,
+    Query(query): Query<AccountQuery>,
+) -> Response {
+    let Some(account_id) = query
+        .account_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    else {
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            json!({"ok": false, "error": "instagram_account_required"}),
+        );
+    };
+    match state.account_profile_picture_url(account_id).await {
+        Ok(profile_picture_url) => json_response(
+            StatusCode::OK,
+            json!({"profile_picture_url": profile_picture_url}),
+        ),
+        Err(error) => workflow_error(error),
+    }
+}
+
 async fn connect_account(
     State(state): State<AppState>,
     Json(payload): Json<ConnectAccountRequest>,
@@ -68,6 +96,14 @@ async fn connect_account(
 #[derive(Deserialize, Default)]
 struct AccountQuery {
     account_id: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct CommentsQuery {
+    account_id: Option<String>,
+    #[serde(default)]
+    probe: bool,
+    media_id: Option<String>,
 }
 
 async fn schedule_account_id(
@@ -125,6 +161,98 @@ struct AnalyticsQuery {
     refresh: String,
 }
 
+#[derive(Deserialize, Default)]
+struct PluginSummaryQuery {
+    days: Option<u8>,
+}
+
+async fn plugin_health(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Some(response) = plugin_auth_error(&state, &headers) {
+        return response;
+    }
+    match state.connected_accounts().await {
+        Ok(accounts) => json_response(
+            StatusCode::OK,
+            json!({
+                "ok": true,
+                "authenticated": true,
+                "configured": !accounts.is_empty(),
+                "account": accounts.first().map(|account| json!({"username": account.username, "igUserId": account.id})).unwrap_or(Value::Null),
+            }),
+        ),
+        Err(error) => internal_error(error),
+    }
+}
+
+async fn plugin_summary(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<PluginSummaryQuery>,
+) -> Response {
+    if let Some(response) = plugin_auth_error(&state, &headers) {
+        return response;
+    }
+    let days = query.days.unwrap_or(7);
+    let period = match days {
+        1 => "today",
+        7 => "7d",
+        30 => "30d",
+        _ => {
+            return json_response(
+                StatusCode::BAD_REQUEST,
+                json!({"ok": false, "error": "unsupported_period", "message": "days must be 1, 7, or 30"}),
+            );
+        }
+    };
+    let account = match state.resolve_account(None).await {
+        Ok(account) => account,
+        Err(error) => return workflow_error(error),
+    };
+    match state.analytics(&account.id, period, false).await {
+        Ok(analytics) => json_response(StatusCode::OK, json!({"ok": true, "analytics": analytics})),
+        Err(_) => json_response(
+            StatusCode::BAD_GATEWAY,
+            json!({
+                "ok": false,
+                "error": "meta_insights_unavailable",
+                "message": "A Meta não retornou Insights atuais. Tente novamente mais tarde."
+            }),
+        ),
+    }
+}
+
+fn plugin_auth_error(state: &AppState, headers: &HeaderMap) -> Option<Response> {
+    if state.config.plugin_api_key.is_empty() {
+        return Some(json_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({"ok": false, "error": "plugin_auth_not_configured"}),
+        ));
+    }
+    let provided = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .unwrap_or("");
+    if constant_time_equal(provided.as_bytes(), state.config.plugin_api_key.as_bytes()) {
+        None
+    } else {
+        Some(json_response(
+            StatusCode::UNAUTHORIZED,
+            json!({"ok": false, "error": "plugin_unauthorized"}),
+        ))
+    }
+}
+
+fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
+    let mut difference = left.len() ^ right.len();
+    for index in 0..left.len().max(right.len()) {
+        difference |= usize::from(
+            left.get(index).copied().unwrap_or(0) ^ right.get(index).copied().unwrap_or(0),
+        );
+    }
+    difference == 0
+}
+
 fn default_period() -> String {
     "30d".into()
 }
@@ -145,6 +273,52 @@ async fn analytics(State(state): State<AppState>, Query(query): Query<AnalyticsQ
                 "ok": false,
                 "error": "meta_insights_unavailable",
                 "message": "A Meta não retornou Insights atuais. Atualize novamente em instantes."
+            }),
+        ),
+    }
+}
+
+async fn comments(State(state): State<AppState>, Query(query): Query<CommentsQuery>) -> Response {
+    let account = match state.resolve_account(query.account_id.as_deref()).await {
+        Ok(account) => account,
+        Err(error) => return workflow_error(error),
+    };
+    if query.probe {
+        return match state
+            .comments_probe(&account.id, query.media_id.as_deref())
+            .await
+        {
+            Ok(payload) => json_response(
+                StatusCode::OK,
+                json!({"ok": true, "account": {"id": account.id, "username": account.username}, "probe": payload}),
+            ),
+            Err(error) => json_response(
+                StatusCode::BAD_GATEWAY,
+                json!({"ok": false, "error": "instagram_comments_probe_failed", "message": error.message}),
+            ),
+        };
+    }
+    match state.comments(&account.id).await {
+        Ok(payload) => json_response(
+            StatusCode::OK,
+            json!({
+                "ok": true,
+                "account": {"id": account.id, "username": account.username},
+                "posts": payload.get("posts").cloned().unwrap_or_else(|| json!([])),
+                "reported_comments": payload.get("reported_comments").cloned().unwrap_or_else(|| json!(0)),
+                "retrieved_comments": payload.get("retrieved_comments").cloned().unwrap_or_else(|| json!(0)),
+                "comments_incomplete": payload.get("comments_incomplete").and_then(Value::as_bool).unwrap_or(false),
+                "failed_publications": payload.get("failed_publications").cloned().unwrap_or_else(|| json!(0)),
+                "empty_comment_edges": payload.get("empty_comment_edges").cloned().unwrap_or_else(|| json!(0)),
+                "required_permission": if state.config.graph_api_base_url.contains("graph.instagram.com") { "instagram_business_manage_comments" } else { "instagram_manage_comments" },
+            }),
+        ),
+        Err(error) => json_response(
+            StatusCode::BAD_GATEWAY,
+            json!({
+                "ok": false,
+                "error": "instagram_comments_unavailable",
+                "message": error.message,
             }),
         ),
     }
@@ -253,7 +427,7 @@ async fn create_publication(
                         }
                         return workflow_error(failure);
                     }
-            };
+                };
             total_upload_bytes += size;
             media_files.push(UploadedMedia {
                 filename,

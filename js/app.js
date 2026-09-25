@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const accountDropdown = document.getElementById('accountDropdown');
   const accountMenuList = document.getElementById('accountMenuList');
   const activeAccountUsername = document.getElementById('activeAccountUsername');
+  const activeAccountAvatar = document.getElementById('activeAccountAvatar');
   const accountConnectModal = document.getElementById('accountConnectModal');
   const accountConnectForm = document.getElementById('accountConnectForm');
   const instagramAccessToken = document.getElementById('instagramAccessToken');
@@ -36,6 +37,60 @@ document.addEventListener('DOMContentLoaded', () => {
 
   window.getActiveInstagramAccountId = () => activeInstagramAccount?.id || '';
   window.getActiveInstagramAccountUsername = () => activeInstagramAccount?.username || '';
+
+  function safeProfilePictureUrl(value) {
+    const url = typeof value === 'string' ? value.trim() : '';
+    return /^https:\/\//i.test(url) ? url : '';
+  }
+
+  function renderAccountAvatar(container, account) {
+    if (!container) return;
+    const initial = (account?.username || '?').replace(/^@/, '').slice(0, 1).toUpperCase() || '?';
+    const fallback = document.createElement('span');
+    fallback.className = 'account-avatar-fallback';
+    fallback.textContent = initial;
+    const pictureUrl = safeProfilePictureUrl(account?.profile_picture_url);
+
+    if (!pictureUrl) {
+      container.replaceChildren(fallback);
+      return;
+    }
+
+    const image = document.createElement('img');
+    image.alt = '';
+    image.loading = 'lazy';
+    image.decoding = 'async';
+    image.referrerPolicy = 'no-referrer';
+    fallback.hidden = true;
+    image.addEventListener('error', () => {
+      image.remove();
+      fallback.hidden = false;
+    }, { once: true });
+    container.replaceChildren(image, fallback);
+    image.src = pictureUrl;
+  }
+
+  function loadAccountAvatars() {
+    connectedAccounts.forEach(account => {
+      if (account.avatarLoaded || safeProfilePictureUrl(account.profile_picture_url)) return;
+      account.avatarLoaded = true;
+      const query = new URLSearchParams({ account_id: account.id });
+      fetch(`/api/account-profile?${query.toString()}`, { headers: { Accept: 'application/json' }, cache: 'no-store' })
+        .then(response => response.ok ? response.json() : null)
+        .then(payload => {
+          const pictureUrl = safeProfilePictureUrl(payload?.profile_picture_url);
+          if (!pictureUrl) return;
+          const currentAccount = connectedAccounts.find(candidate => candidate.id === account.id);
+          if (!currentAccount) return;
+          currentAccount.profile_picture_url = pictureUrl;
+          renderAccountMenu();
+          if (activeInstagramAccount?.id === currentAccount.id) {
+            renderAccountAvatar(activeAccountAvatar, currentAccount);
+          }
+        })
+        .catch(() => {});
+    });
+  }
 
   function accountScopedUrl(path, accountId = activeInstagramAccount?.id) {
     if (!accountId) return path;
@@ -64,7 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const avatar = document.createElement('span');
       avatar.className = 'account-menu-avatar';
       avatar.setAttribute('aria-hidden', 'true');
-      avatar.textContent = (account.username || '?').replace(/^@/, '').slice(0, 1).toUpperCase();
+      renderAccountAvatar(avatar, account);
       const username = document.createElement('span');
       username.className = 'account-menu-username';
       username.textContent = `@${String(account.username || account.id).replace(/^@/, '')}`;
@@ -90,6 +145,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const displayName = username ? `@${username.replace(/^@/, '')}` : 'Conecte uma conta';
     if (activeAccountUsername) activeAccountUsername.textContent = displayName;
     if (accountSelectorButton) accountSelectorButton.title = username ? `Conta ativa: ${displayName}` : 'Conectar conta do Instagram';
+    renderAccountAvatar(activeAccountAvatar, activeInstagramAccount);
     const previewName = document.getElementById('previewAccountUsername');
     if (previewName) previewName.textContent = username || 'Instagram';
     const analyticsName = document.getElementById('activeAnalyticsAccount');
@@ -195,15 +251,21 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       const account = {
         id: String(payload.account.id),
-        username: String(payload.account.username || payload.account.id).replace(/^@/, '')
+        username: String(payload.account.username || payload.account.id).replace(/^@/, ''),
+        profile_picture_url: safeProfilePictureUrl(payload.account.profile_picture_url)
       };
+      const reconnectingActiveAccount = activeInstagramAccount?.id === account.id;
       connectedAccounts = [...connectedAccounts.filter(existing => existing.id !== account.id), account];
       accountsLoaded = true;
+      loadAccountAvatars();
       accountConnectModal.hidden = true;
       accountConnectForm.reset();
       renderAccountMenu();
       setActiveInstagramAccount(account);
-      showToast(`Conta @${account.username} conectada e selecionada.`, 'success');
+      if (reconnectingActiveAccount) {
+        document.dispatchEvent(new CustomEvent('instagram-account-changed', { detail: { account, credentialsUpdated: true } }));
+      }
+      showToast(`Conta @${account.username} conectada ou atualizada.`, 'success');
     } catch (error) {
       accountConnectError.textContent = error.message || 'Não foi possível conectar a conta.';
       accountConnectError.hidden = false;
@@ -221,7 +283,8 @@ document.addEventListener('DOMContentLoaded', () => {
       connectedAccounts = Array.isArray(payload.accounts)
         ? payload.accounts.filter(account => account?.id && account?.username).map(account => ({
           id: String(account.id),
-          username: String(account.username).replace(/^@/, '')
+          username: String(account.username).replace(/^@/, ''),
+          profile_picture_url: safeProfilePictureUrl(account.profile_picture_url)
         }))
         : [];
     } catch (_) {
@@ -229,6 +292,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     accountsLoaded = true;
     renderAccountMenu();
+    loadAccountAvatars();
     const storedId = (() => {
       try { return localStorage.getItem(ACTIVE_ACCOUNT_STORAGE_KEY); } catch (_) { return null; }
     })();
@@ -1265,9 +1329,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const tabBtnPlanner = document.getElementById('tabBtnPlanner');
   const tabBtnAgendamentos = document.getElementById('tabBtnAgendamentos');
   const tabBtnAnalises = document.getElementById('tabBtnAnalises');
+  const tabBtnComentarios = document.getElementById('tabBtnComentarios');
   const viewPlanner = document.getElementById('viewPlanner');
   const viewAgendamentos = document.getElementById('viewAgendamentos');
   const viewAnalises = document.getElementById('viewAnalises');
+  const viewComentarios = document.getElementById('viewComentarios');
   const btnGoToPlanner = document.getElementById('btnGoToPlanner');
   const agendamentosCountBadge = document.getElementById('agendamentosCountBadge');
 
@@ -1275,9 +1341,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (tabBtnPlanner) tabBtnPlanner.classList.remove('active');
     if (tabBtnAgendamentos) tabBtnAgendamentos.classList.remove('active');
     if (tabBtnAnalises) tabBtnAnalises.classList.remove('active');
+    if (tabBtnComentarios) tabBtnComentarios.classList.remove('active');
     if (viewPlanner) viewPlanner.classList.remove('active');
     if (viewAgendamentos) viewAgendamentos.classList.remove('active');
     if (viewAnalises) viewAnalises.classList.remove('active');
+    if (viewComentarios) viewComentarios.classList.remove('active');
 
     if (tabName === 'planner') {
       if (tabBtnPlanner) tabBtnPlanner.classList.add('active');
@@ -1293,12 +1361,17 @@ document.addEventListener('DOMContentLoaded', () => {
       if (window.AnalisesModule) {
         window.AnalisesModule.init();
       }
+    } else if (tabName === 'comentarios') {
+      if (tabBtnComentarios) tabBtnComentarios.classList.add('active');
+      if (viewComentarios) viewComentarios.classList.add('active');
+      window.ComentariosModule?.open();
     }
   }
 
   if (tabBtnPlanner) tabBtnPlanner.addEventListener('click', () => switchTab('planner'));
   if (tabBtnAgendamentos) tabBtnAgendamentos.addEventListener('click', () => switchTab('agendamentos'));
   if (tabBtnAnalises) tabBtnAnalises.addEventListener('click', () => switchTab('analises'));
+  if (tabBtnComentarios) tabBtnComentarios.addEventListener('click', () => switchTab('comentarios'));
   if (btnGoToPlanner) {
     btnGoToPlanner.addEventListener('click', () => switchTab('planner'));
   }

@@ -20,8 +20,9 @@
   <script src="https://cdn.tailwindcss.com"></script>
   
   <!-- Application Styles -->
-  <link rel="stylesheet" href="css/styles.css?v=post-crop-tabs-20260924-2">
-  <link rel="stylesheet" href="css/analises.css?v=reel-performance-layout-20260924">
+  <link rel="stylesheet" href="css/styles.css?v=account-avatars-20260925-1">
+  <link rel="stylesheet" href="css/analises.css?v=chart-intervals-20260925-1">
+  <link rel="stylesheet" href="css/comentarios.css?v=comments-tab-20260925-2">
 </head>
 <body>
 
@@ -40,13 +41,11 @@
             </div>
           </div>
           <div class="flex items-center gap-3">
-            <h1 class="text-2xl font-bold text-gray-900 tracking-tight">Criar nova publicação</h1>
-            
             <!-- Active Instagram account and account switcher -->
             <div class="account-switcher">
               <button type="button" class="brand-pill" id="accountSelectorButton" title="Selecionar conta do Instagram" aria-haspopup="true" aria-expanded="false" aria-controls="accountDropdown">
-                <span class="v-avatar" aria-hidden="true">
-                  <img src="assets/avatar.jpg" alt="">
+                <span class="v-avatar" id="activeAccountAvatar" aria-hidden="true">
+                  <span class="account-avatar-fallback">?</span>
                 </span>
                 <span class="brand-pill__name truncate max-w-[160px]" id="activeAccountUsername">Carregando contas…</span>
                 <i class="fa-solid fa-chevron-down account-switcher-chevron" aria-hidden="true"></i>
@@ -57,7 +56,7 @@
                 <div class="account-menu-divider"></div>
                 <button type="button" class="account-menu-add" id="btnAddInstagramAccount" role="menuitem">
                   <i class="fa-solid fa-plus" aria-hidden="true"></i>
-                  <span>Adicionar nova conta</span>
+                  <span>Adicionar ou reconectar conta</span>
                 </button>
               </div>
             </div>
@@ -77,6 +76,11 @@
             <button type="button" class="top-nav-tab" id="tabBtnAnalises" data-tab="analises">
               <i class="fa-solid fa-chart-line text-sm"></i>
               <span>Análises</span>
+            </button>
+            <button type="button" class="top-nav-tab" id="tabBtnComentarios" data-tab="comentarios">
+              <i class="fa-regular fa-comments text-sm"></i>
+              <span>Comentários</span>
+              <span class="tab-badge comments-tab-badge" id="commentsCountBadge" hidden>0</span>
             </button>
           </nav>
         </div>
@@ -866,6 +870,30 @@
       </div>
     </div>
 
+    <!-- VIEW 4: Comentários das publicações -->
+    <div class="app-view" id="viewComentarios">
+      <main class="comentarios-container">
+        <header class="comentarios-header">
+          <div>
+            <h2>Comentários</h2>
+            <p id="commentsAccountLabel">Comentários nas publicações da conta ativa</p>
+          </div>
+          <div class="comentarios-header-actions">
+            <button type="button" class="comentarios-toggle" id="btnToggleAnsweredComments" aria-pressed="false" title="Mostrar comentários respondidos">
+              <i class="fa-regular fa-eye" aria-hidden="true"></i>
+              <span>Mostrar respondidos</span>
+            </button>
+            <button type="button" class="comentarios-refresh" id="btnRefreshComments" title="Atualizar comentários">
+              <i class="fa-solid fa-rotate-right" aria-hidden="true"></i>
+              <span>Atualizar</span>
+            </button>
+          </div>
+        </header>
+        <div class="comentarios-status" id="commentsStatus" role="status" aria-live="polite">Abra esta aba para buscar comentários no Instagram.</div>
+        <section class="comentarios-list" id="commentsList" aria-label="Comentários mais recentes"></section>
+      </main>
+    </div>
+
   </div>
 
   <!-- Modal: Post Details & Preview (Ao clicar em um agendamento) -->
@@ -1151,7 +1179,8 @@
   <div class="apple-reel-popover" id="appleReelPopover"></div>
 
   <!-- Application Logic -->
-  <script src="js/analises.js?v=reel-grid-layout-20260924"></script>
-  <script src="js/app.js?v=post-image-crop-20260924"></script>
+  <script src="js/analises.js?v=chart-intervals-20260925-2"></script>
+  <script src="js/comentarios.js?v=comments-tab-20260925-3"></script>
+  <script src="js/app.js?v=account-avatars-20260925-1"></script>
 </body>
 </html>

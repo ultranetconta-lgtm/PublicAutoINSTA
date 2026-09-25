@@ -1,5 +1,6 @@
 use crate::error::MetaError;
 use futures_util::future::try_join_all;
+use futures_util::{StreamExt, stream};
 use reqwest::{Client, Method, Url};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -51,6 +52,26 @@ impl MetaClient {
             .map_err(|_| MetaError::new("Meta account URL is invalid"))?;
         url.query_pairs_mut().append_pair("fields", "id,username");
         self.request_json(Method::GET, url.as_str(), None).await
+    }
+
+    pub async fn refresh_long_lived_token(&self) -> Result<(String, u64), MetaError> {
+        let mut url = Url::parse(&format!("{}/refresh_access_token", self.base_url))
+            .map_err(|_| MetaError::new("Instagram token refresh URL is invalid"))?;
+        url.query_pairs_mut()
+            .append_pair("grant_type", "ig_refresh_token")
+            .append_pair("access_token", &self.access_token);
+        let payload = self.request_json(Method::GET, url.as_str(), None).await?;
+        let token = payload
+            .get("access_token")
+            .and_then(Value::as_str)
+            .filter(|token| !token.is_empty() && token.len() <= 8192)
+            .ok_or_else(|| MetaError::new("Meta did not return a refreshed access token"))?;
+        let expires_in = payload
+            .get("expires_in")
+            .and_then(Value::as_u64)
+            .filter(|seconds| *seconds > 0)
+            .ok_or_else(|| MetaError::new("Meta did not return a token lifetime"))?;
+        Ok((token.to_string(), expires_in))
     }
 
     async fn request_json(
@@ -341,7 +362,9 @@ impl MetaClient {
         caption: &str,
     ) -> Result<(String, String), MetaError> {
         if !(2..=10).contains(&media_items.len()) {
-            return Err(MetaError::new("carousel must contain between 2 and 10 items"));
+            return Err(MetaError::new(
+                "carousel must contain between 2 and 10 items",
+            ));
         }
         let mut child_container_ids = Vec::with_capacity(media_items.len());
         for (media_url, media_kind) in media_items {
@@ -460,6 +483,205 @@ impl MetaClient {
             .unwrap_or_default())
     }
 
+    pub async fn get_media_with_comments(&self) -> Result<Vec<Value>, MetaError> {
+        let media = self
+            .get_all_pages(
+                &self.endpoint("media"),
+                "id,caption,media_type,media_product_type,thumbnail_url,permalink,timestamp,comments_count",
+            )
+            .await?;
+        let mut posts = stream::iter(media)
+            .map(|mut post| {
+                let client = self.clone();
+                async move {
+                    let Some(media_id) = post
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                    else {
+                        post["comments"] = json!([]);
+                        post["comments_error"] = json!({
+                            "message": "A Meta retornou uma publicação sem ID."
+                        });
+                        return post;
+                    };
+                    let comments_endpoint = client.container_endpoint(&media_id) + "/comments";
+                    match client
+                        .get_all_pages(
+                            &comments_endpoint,
+                            "id,text,username,timestamp,replies{id,text,username,timestamp}",
+                        )
+                        .await
+                    {
+                        Ok(comments) => {
+                            post["comments"] = Value::Array(comments);
+                            post["comments_error"] = Value::Null;
+                            let reported_count = post
+                                .get("comments_count")
+                                .and_then(value_as_integer)
+                                .unwrap_or_default();
+                            post["comments_warning"] = if reported_count > 0
+                                && post["comments"].as_array().is_some_and(Vec::is_empty)
+                            {
+                                json!({
+                                    "message": format!(
+                                        "Meta reports comments_count={reported_count} for media {media_id}, but /comments returned data:[]."
+                                    )
+                                })
+                            } else {
+                                Value::Null
+                            };
+                        }
+                        Err(error) => {
+                            post["comments"] = json!([]);
+                            post["comments_warning"] = Value::Null;
+                            post["comments_error"] = json!({
+                                "message": format!("Publicação {media_id}: {}", error.message)
+                            });
+                        }
+                    }
+                    post
+                }
+            })
+            .buffer_unordered(5)
+            .collect::<Vec<_>>()
+            .await;
+        posts.sort_by(|left, right| {
+            right
+                .get("timestamp")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .cmp(left.get("timestamp").and_then(Value::as_str).unwrap_or(""))
+        });
+        Ok(posts)
+    }
+
+    pub async fn probe_media_comments(
+        &self,
+        requested_media_id: Option<&str>,
+    ) -> Result<Value, MetaError> {
+        let media = self
+            .get_all_pages(
+                &self.endpoint("media"),
+                "id,caption,media_type,media_product_type,permalink,timestamp,comments_count",
+            )
+            .await?;
+        let has_comments = |post: &&Value| {
+            post.get("comments_count")
+                .and_then(value_as_integer)
+                .is_some_and(|count| count > 0)
+        };
+        let post = match requested_media_id {
+            Some(media_id) => media
+                .iter()
+                .find(|post| post.get("id").and_then(Value::as_str) == Some(media_id))
+                .cloned()
+                .ok_or_else(|| {
+                    MetaError::new("A mídia informada não pertence às publicações desta conta")
+                })?,
+            None => media
+                .iter()
+                .find(|post| {
+                    post.get("media_type").and_then(Value::as_str) == Some("IMAGE")
+                        && post.get("media_product_type").and_then(Value::as_str) == Some("FEED")
+                        && has_comments(post)
+                })
+                .or_else(|| media.iter().find(has_comments))
+                .cloned()
+                .ok_or_else(|| {
+                    MetaError::new("Meta não retornou uma publicação com comments_count positivo")
+                })?,
+        };
+        let media_id = post
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| MetaError::new("Meta retornou publicação sem ID"))?;
+        let comments_endpoint = self.container_endpoint(media_id) + "/comments";
+        let (comments, pagination_pages) = self
+            .get_all_pages_with_limit(&comments_endpoint, "id,text,timestamp", 10)
+            .await?;
+        Ok(json!({
+            "media": {
+                "id": media_id,
+                "media_type": post.get("media_type").cloned().unwrap_or(Value::Null),
+                "media_product_type": post.get("media_product_type").cloned().unwrap_or(Value::Null),
+                "comments_count": post.get("comments_count").cloned().unwrap_or(Value::Null),
+                "permalink": post.get("permalink").cloned().unwrap_or(Value::Null),
+                "timestamp": post.get("timestamp").cloned().unwrap_or(Value::Null),
+            },
+            "comments": comments,
+            "pagination_pages": pagination_pages,
+        }))
+    }
+
+    async fn get_all_pages(&self, endpoint: &str, fields: &str) -> Result<Vec<Value>, MetaError> {
+        self.get_all_pages_with_limit(endpoint, fields, 50)
+            .await
+            .map(|(records, _)| records)
+    }
+
+    async fn get_all_pages_with_limit(
+        &self,
+        endpoint: &str,
+        fields: &str,
+        limit: usize,
+    ) -> Result<(Vec<Value>, usize), MetaError> {
+        let mut after: Option<String> = None;
+        let mut seen_cursors = std::collections::HashSet::new();
+        let mut records = Vec::new();
+        let mut page_count = 0;
+        loop {
+            let mut url =
+                Url::parse(endpoint).map_err(|_| MetaError::new("Instagram API URL is invalid"))?;
+            url.query_pairs_mut()
+                .append_pair("fields", fields)
+                .append_pair("limit", &limit.to_string());
+            if let Some(cursor) = after.as_deref() {
+                url.query_pairs_mut().append_pair("after", cursor);
+            }
+            let response = self.request_json(Method::GET, url.as_str(), None).await?;
+            page_count += 1;
+            let page_records = response
+                .get("data")
+                .and_then(Value::as_array)
+                .cloned()
+                .ok_or_else(|| {
+                    let edge = endpoint.rsplit('/').next().unwrap_or("edge");
+                    MetaError::new(format!(
+                        "Meta response for {edge} did not contain a data array"
+                    ))
+                })?;
+            records.extend(page_records);
+            let paging = response.get("paging");
+            let has_more = paging
+                .and_then(|value| value.get("next"))
+                .and_then(Value::as_str)
+                .is_some_and(|next| !next.is_empty())
+                || paging
+                    .and_then(|value| value.get("has_next_page"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+            let cursor = paging
+                .and_then(|value| value.pointer("/cursors/after"))
+                .and_then(Value::as_str)
+                .filter(|cursor| !cursor.is_empty())
+                .map(str::to_owned);
+            if !has_more {
+                break;
+            }
+            let Some(cursor) = cursor else {
+                return Err(MetaError::new(
+                    "Meta indicated another page but did not return a pagination cursor",
+                ));
+            };
+            if !seen_cursors.insert(cursor.clone()) {
+                return Err(MetaError::new("Meta returned a repeated pagination cursor"));
+            }
+            after = Some(cursor);
+        }
+        Ok((records, page_count))
+    }
+
     pub async fn get_account_insights(
         &self,
         metrics: &[&str],
@@ -557,7 +779,9 @@ impl MetaClient {
         let mut breakdowns = Vec::new();
         collect_insight_breakdowns(row, &mut breakdowns);
         if breakdowns.is_empty() {
-            return Err(MetaError::new("Meta did not return follower breakdown values"));
+            return Err(MetaError::new(
+                "Meta did not return follower breakdown values",
+            ));
         }
 
         let mut follow_type_breakdown_found = false;
@@ -573,7 +797,10 @@ impl MetaClient {
                 .unwrap_or_default();
             let Some(dimension_index) = keys
                 .iter()
-                .position(|key| key.as_str().is_some_and(|key| key.eq_ignore_ascii_case("follow_type")))
+                .position(|key| {
+                    key.as_str()
+                        .is_some_and(|key| key.eq_ignore_ascii_case("follow_type"))
+                })
                 .or_else(|| (keys.len() == 1).then_some(0))
             else {
                 continue;
@@ -594,8 +821,7 @@ impl MetaClient {
                     .or_else(|| result.get("follow_type").and_then(Value::as_str))
                     .unwrap_or("")
                     .to_ascii_lowercase()
-                    .replace('-', "_")
-                    .replace(' ', "_");
+                    .replace(['-', ' '], "_");
                 let Some(count) = result.get("value").and_then(value_as_integer) else {
                     continue;
                 };
@@ -604,11 +830,7 @@ impl MetaClient {
                         gained = gained.saturating_add(count);
                         gained_found = true;
                     }
-                    "unfollow"
-                    | "unfollows"
-                    | "unfollowed"
-                    | "unfollower"
-                    | "non_follower"
+                    "unfollow" | "unfollows" | "unfollowed" | "unfollower" | "non_follower"
                     | "lost" => {
                         lost = lost.saturating_add(count);
                         lost_found = true;
@@ -619,10 +841,14 @@ impl MetaClient {
         }
 
         if !follow_type_breakdown_found {
-            return Err(MetaError::new("Meta did not return the follow_type breakdown"));
+            return Err(MetaError::new(
+                "Meta did not return the follow_type breakdown",
+            ));
         }
         if !gained_found && !lost_found {
-            return Err(MetaError::new("Meta did not return follow_type counts for this period"));
+            return Err(MetaError::new(
+                "Meta did not return follow_type counts for this period",
+            ));
         }
         Ok((gained, lost))
     }

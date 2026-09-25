@@ -7,6 +7,7 @@ pub struct AppConfig {
     pub access_token: String,
     pub instagram_user_id: String,
     pub instagram_username: String,
+    pub plugin_api_key: String,
     pub graph_api_base_url: String,
     pub graph_api_version: String,
     pub public_base_url: String,
@@ -18,6 +19,7 @@ impl Default for AppConfig {
             access_token: String::new(),
             instagram_user_id: String::new(),
             instagram_username: String::new(),
+            plugin_api_key: String::new(),
             graph_api_base_url: "https://graph.instagram.com".into(),
             graph_api_version: "v25.0".into(),
             public_base_url: String::new(),
@@ -32,6 +34,7 @@ impl AppConfig {
             access_token: env_value("INSTAGRAM_ACCESS_TOKEN", &file_values, ""),
             instagram_user_id: env_value("INSTAGRAM_USER_ID", &file_values, ""),
             instagram_username: env_value("INSTAGRAM_USERNAME", &file_values, ""),
+            plugin_api_key: env_value("PLUGIN_API_KEY", &file_values, ""),
             graph_api_base_url: env_value(
                 "GRAPH_API_BASE_URL",
                 &file_values,

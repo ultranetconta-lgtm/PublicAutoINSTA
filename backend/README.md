@@ -16,6 +16,8 @@ As credenciais ficam somente em `api/.env` no ambiente local ou nas variáveis d
 
 `PUBLIC_BASE_URL` é obrigatório para publicar e precisa ser HTTPS acessível externamente. A Meta baixa a mídia em `PUBLIC_BASE_URL/media/<arquivo>`; `localhost` não funciona nessa etapa. O backend valida a resposta HEAD e o tamanho do arquivo antes de agendar e novamente no horário de publicação.
 
+Tokens de usuário do Instagram de longa duração vencem em até 60 dias; a Meta não oferece uma opção sem vencimento nesse fluxo. O backend tenta renovar tokens sem data de validade conhecida ao iniciar e verifica diariamente os tokens armazenados. Após uma renovação, tenta novamente quando restarem 30 dias. O token atualizado e a nova data de vencimento são gravados em `backend/data/accounts.json` com permissão privada e passam a ser usados pelas próximas chamadas. A Meta só aceita renovar um token válido de longa duração com pelo menos 24 horas; se o token ainda for novo, a rotina tentará no dia seguinte. Tokens expirados ou revogados exigem uma nova conexão da conta. O token inicial de `api/.env` é copiado ao armazenamento privado somente quando a conta ainda não existe nele.
+
 ## Executar e testar
 
 Na raiz do repositório:
@@ -62,6 +64,8 @@ Antes de enviar um Reel, o backend calcula SHA-256 e recusa mídia repetida com 
 
 As análises mantêm o contrato do painel: períodos `today`, `7d` e `30d`, limites diários de `America/Sao_Paulo`, `views` e `reach` reais da Meta, até cinco consultas simultâneas e cache de 20 segundos para perfil/publicações recentes. Views por Reel vêm de Insights da mídia; o backend não estima visualizações com base em curtidas. A Meta pode levar até 48 horas para consolidar alguns Insights.
 
+O plugin local `Instagram Resumos` pode consultar `GET /api/plugin/health` e `GET /api/plugin/summary?days=7` pela URL HTTPS do deploy. Configure `PLUGIN_API_KEY` como secret independente tanto no app Fly quanto no ambiente privado do plugin; ambas as rotas exigem `Authorization: Bearer <PLUGIN_API_KEY>`, são somente leitura e aceitam `days=1`, `7` ou `30`. O token da Meta não é enviado ao plugin.
+
 ## Deploy Fly.io
 
 O Dockerfile compila um binário Rust release em uma etapa de build e executa esse binário com FFmpeg na imagem final. Fly escuta na porta 8080; os dados persistem no volume `/data`, montado em `backend/data` e `backend/uploads` para preservar os caminhos e os agendamentos atuais.
@@ -70,7 +74,7 @@ Um teste de `Publicar agora` altera a conta do Instagram. Os testes automáticos
 
 ## Versões e rollback
 
-A release GitHub `v1.0` permanece disponível como versão anterior; `v2.0.0` identifica esta implementação Rust. Para voltar o app Fly ao código 1.0:
+A release GitHub `v1.0` permanece disponível como versão anterior; `v2.0.0` identifica a migração para Rust, `v2.1.0` adiciona publicação independente por conta e `v2.2.0` reúne comentários, renovação automática de tokens e melhorias de Reels e perfis. Para voltar o app Fly ao código 1.0:
 
 ```bash
 git switch --detach v1.0

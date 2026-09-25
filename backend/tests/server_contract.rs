@@ -68,6 +68,54 @@ async fn health_never_returns_configured_credentials() {
     assert!(payload.get("access_token").is_none());
 }
 
+#[tokio::test]
+async fn due_instagram_token_is_refreshed_and_persisted_without_immediate_retry() {
+    let temp = TempDir::new().unwrap();
+    let (graph_url, server, requests) = mock_graph_server().await;
+    let config = AppConfig {
+        access_token: "legacy-token".into(),
+        instagram_user_id: "ig-user".into(),
+        instagram_username: "account".into(),
+        graph_api_base_url: graph_url,
+        ..AppConfig::default()
+    };
+    let state = AppState::new(config, temp.path()).unwrap();
+    state.initialize().await.unwrap();
+
+    state.refresh_due_tokens().await.unwrap();
+    let accounts = state.accounts.list().await.unwrap();
+    assert_eq!(accounts.len(), 1);
+    assert_eq!(accounts[0].access_token(), "renewed-token");
+    assert!(accounts[0].expires_at().unwrap() > chrono::Utc::now().timestamp() + 50 * 86400);
+    assert!(requests.lock().await.iter().any(|request| {
+        request.contains("/me?fields=id")
+            && request
+                .to_ascii_lowercase()
+                .contains("authorization: bearer renewed-token")
+    }));
+    assert_eq!(
+        requests
+            .lock()
+            .await
+            .iter()
+            .filter(|request| request.contains("/refresh_access_token?"))
+            .count(),
+        1
+    );
+
+    state.refresh_due_tokens().await.unwrap();
+    assert_eq!(
+        requests
+            .lock()
+            .await
+            .iter()
+            .filter(|request| request.contains("/refresh_access_token?"))
+            .count(),
+        1
+    );
+    server.abort();
+}
+
 #[test]
 fn public_media_urls_require_https_and_encode_only_the_filename() {
     assert_eq!(
@@ -244,7 +292,7 @@ async fn multipart_upload_is_streamed_and_temporary_media_is_cleaned_on_rejectio
     let payload: Value = serde_json::from_slice(&body).unwrap();
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(payload["error"], "meta_not_configured");
+    assert_eq!(payload["error"], "instagram_account_required");
     assert_eq!(
         fs::read_dir(temp.path().join("backend/uploads"))
             .unwrap()
@@ -472,6 +520,7 @@ async fn analytics_contract_uses_local_meta_responses_and_actual_reel_views() {
         access_token: "test-token".into(),
         instagram_user_id: "ig-user".into(),
         instagram_username: "alesantorooficial".into(),
+        plugin_api_key: String::new(),
         graph_api_base_url: base_url,
         graph_api_version: "v26.0".into(),
         public_base_url: String::new(),
@@ -560,6 +609,10 @@ async fn mock_graph_server() -> (String, tokio::task::JoinHandle<()>, Arc<Mutex<
                 let path = request.lines().next().unwrap_or("");
                 let payload = if path.contains("/ig-user?") {
                     r#"{"username":"mock-account","followers_count":7,"media_count":11,"profile_picture_url":"https://images.example/avatar.jpg"}"#
+                } else if path.contains("/refresh_access_token?") {
+                    r#"{"access_token":"renewed-token","token_type":"bearer","expires_in":5184000}"#
+                } else if path.contains("/me?fields=id") {
+                    r#"{"id":"ig-user"}"#
                 } else if path.contains("/ig-user/media?") {
                     r#"{"data":[{"id":"reel-1","media_product_type":"REELS","media_type":"VIDEO","caption":"Today","thumbnail_url":"https://images.example/reel.jpg","permalink":"https://instagram.com/reel-1","timestamp":"__NOW__","like_count":4,"comments_count":2}]}"#
                 } else if path.contains("/reel-1/insights") {

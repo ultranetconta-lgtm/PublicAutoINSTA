@@ -16,7 +16,7 @@ use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tempfile::TempPath;
 use tokio::sync::{Mutex, Notify};
@@ -71,7 +71,77 @@ impl AppState {
     }
 
     pub async fn initialize(&self) -> anyhow::Result<()> {
-        self.store.recover_processing().await
+        self.store.recover_processing().await?;
+        if self.service.is_some() {
+            self.accounts
+                .insert_if_absent(StoredAccount::new(
+                    self.config.instagram_user_id.clone(),
+                    self.config.instagram_username.clone(),
+                    self.config.access_token.clone(),
+                ))
+                .await?;
+        }
+        Ok(())
+    }
+
+    pub async fn refresh_due_tokens(&self) -> anyhow::Result<()> {
+        let now = Utc::now().timestamp();
+        for account in self.accounts.list().await? {
+            if account
+                .expires_at()
+                .is_some_and(|expiry| expiry > now + 30 * 86_400)
+            {
+                continue;
+            }
+            let client = MetaClient::new(
+                account.access_token().to_string(),
+                account.id.clone(),
+                self.config.graph_api_base_url.clone(),
+                self.config.graph_api_version.clone(),
+            );
+            match client.refresh_long_lived_token().await {
+                Ok((token, expires_in)) => {
+                    let refreshed_client = MetaClient::new(
+                        token.clone(),
+                        account.id.clone(),
+                        self.config.graph_api_base_url.clone(),
+                        self.config.graph_api_version.clone(),
+                    );
+                    match refreshed_client.get_authenticated_profile().await {
+                        Ok(profile)
+                            if profile.get("id").and_then(Value::as_str)
+                                == Some(account.id.as_str()) => {}
+                        Ok(_) => {
+                            tracing::warn!(account_id = %account.id, "Refreshed token belongs to a different Instagram account");
+                            continue;
+                        }
+                        Err(error) => {
+                            tracing::warn!(account_id = %account.id, error = %error, "Refreshed Instagram token could not be validated");
+                            continue;
+                        }
+                    }
+                    let Some(expires_at) = i64::try_from(expires_in)
+                        .ok()
+                        .and_then(|seconds| now.checked_add(seconds))
+                    else {
+                        tracing::warn!(account_id = %account.id, "Meta returned an invalid token lifetime");
+                        continue;
+                    };
+                    self.accounts
+                        .replace_token_if_current(
+                            &account.id,
+                            account.access_token(),
+                            &token,
+                            expires_at,
+                        )
+                        .await?;
+                }
+                Err(error) => {
+                    tracing::warn!(account_id = %account.id, error = %error, "Instagram token renewal failed");
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn notify_scheduler(&self) {
@@ -99,6 +169,7 @@ impl AppState {
             connected.push(PublicAccount {
                 id: self.config.instagram_user_id.clone(),
                 username,
+                profile_picture_url: None,
             });
         }
         for account in self.accounts.list().await? {
@@ -130,23 +201,46 @@ impl AppState {
     }
 
     pub async fn service_for_account(&self, account_id: &str) -> Option<MetaClient> {
+        let stored_accounts = self.accounts.list().await.ok()?;
+        if let Some(account) = stored_accounts
+            .into_iter()
+            .find(|account| account.id == account_id)
+        {
+            return Some(MetaClient::new(
+                account.access_token().to_string(),
+                account.id,
+                self.config.graph_api_base_url.clone(),
+                self.config.graph_api_version.clone(),
+            ));
+        }
         if self.service.is_some() && self.config.instagram_user_id == account_id {
             return self.service.as_deref().cloned();
         }
-        self.accounts
-            .list()
+        None
+    }
+
+    pub async fn account_profile_picture_url(
+        &self,
+        account_id: &str,
+    ) -> Result<Option<String>, WorkflowError> {
+        let account = self.resolve_account(Some(account_id)).await?;
+        let service = self
+            .service_for_account(&account.id)
             .await
-            .ok()?
-            .into_iter()
-            .find(|account| account.id == account_id)
-            .map(|account| {
-                MetaClient::new(
-                    account.access_token().to_string(),
-                    account.id,
-                    self.config.graph_api_base_url.clone(),
-                    self.config.graph_api_version.clone(),
-                )
-            })
+            .ok_or_else(|| WorkflowError::bad_request("instagram_account_not_found"))?;
+        let profile = service
+            .get_profile()
+            .await
+            .map_err(WorkflowError::internal)?;
+        if profile.get("id").and_then(Value::as_str) != Some(account.id.as_str()) {
+            return Err(WorkflowError::bad_request("instagram_account_not_found"));
+        }
+        Ok(profile
+            .get("profile_picture_url")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|url| url.starts_with("https://"))
+            .map(str::to_owned))
     }
 
     pub async fn connect_account(
@@ -180,25 +274,11 @@ impl AppState {
             .ok_or_else(|| WorkflowError::bad_request("instagram_token_invalid"))?
             .trim_start_matches('@')
             .to_string();
-        if self
-            .connected_accounts()
-            .await
-            .map_err(WorkflowError::internal)?
-            .iter()
-            .any(|account| account.id == id)
-        {
-            return Err(WorkflowError::bad_request(
-                "instagram_account_already_connected",
-            ));
-        }
         let account = StoredAccount::new(id, username, access_token.to_string());
-        self.accounts.add(account.clone()).await.map_err(|error| {
-            if error.to_string().contains("account_already_connected") {
-                WorkflowError::bad_request("instagram_account_already_connected")
-            } else {
-                WorkflowError::internal(error)
-            }
-        })?;
+        self.accounts
+            .upsert(account.clone())
+            .await
+            .map_err(WorkflowError::internal)?;
         Ok(account.public())
     }
 
@@ -425,20 +505,24 @@ impl AppState {
         }
         self.require_publish_configuration()?;
 
-        let mut saved_items: Vec<(String, String, String, PathBuf)> = Vec::with_capacity(media_files.len());
+        let mut saved_items: Vec<(String, String, String, PathBuf)> =
+            Vec::with_capacity(media_files.len());
         for (media, (media_kind, extension)) in media_files.into_iter().zip(media_specs) {
-            let extension = if media_kind == "video" { ".mp4" } else { extension };
-            let (filename, media_url, media_path) =
-                match self
-                    .save_public_media(media, extension, media_kind == "video")
-                    .await
-                {
-                    Ok(saved) => saved,
-                    Err(error) => {
-                        remove_saved_media_files(&saved_items).await;
-                        return Err(error);
-                    }
-                };
+            let extension = if media_kind == "video" {
+                ".mp4"
+            } else {
+                extension
+            };
+            let (filename, media_url, media_path) = match self
+                .save_public_media(media, extension, media_kind == "video")
+                .await
+            {
+                Ok(saved) => saved,
+                Err(error) => {
+                    remove_saved_media_files(&saved_items).await;
+                    return Err(error);
+                }
+            };
             let size = match tokio::fs::metadata(&media_path).await {
                 Ok(metadata) => metadata.len(),
                 Err(error) => {
@@ -654,7 +738,11 @@ impl AppState {
             .to_string();
         let result = if publication_type == "test_reel" {
             service
-                .publish_reel(&media_url, &caption, strategy.as_deref().unwrap_or("MANUAL"))
+                .publish_reel(
+                    &media_url,
+                    &caption,
+                    strategy.as_deref().unwrap_or("MANUAL"),
+                )
                 .await
         } else {
             service.publish_feed_reel(&media_url, &caption).await
@@ -996,6 +1084,91 @@ impl AppState {
         force_refresh: bool,
     ) -> Result<Value, MetaError> {
         analytics::build_analytics(self, account_id, period, force_refresh).await
+    }
+
+    pub async fn comments(&self, account_id: &str) -> Result<Value, MetaError> {
+        let service = self
+            .service_for_account(account_id)
+            .await
+            .ok_or_else(|| MetaError::new("Instagram account comments are not configured"))?;
+        let posts = service.get_media_with_comments().await?;
+        let failed_publications = posts
+            .iter()
+            .filter(|post| {
+                post.get("comments_error")
+                    .is_some_and(|error| !error.is_null())
+            })
+            .count();
+        let empty_comment_edges = posts
+            .iter()
+            .filter(|post| {
+                post.get("comments_warning")
+                    .is_some_and(|warning| !warning.is_null())
+            })
+            .count();
+        let reported_comments = posts
+            .iter()
+            .map(|post| {
+                post.get("comments_count")
+                    .and_then(|value| {
+                        value
+                            .as_u64()
+                            .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+                    })
+                    .unwrap_or_default()
+            })
+            .sum::<u64>();
+        let retrieved_comments = posts
+            .iter()
+            .map(|post| {
+                post.get("comments")
+                    .and_then(Value::as_array)
+                    .map(|comments| {
+                        comments
+                            .iter()
+                            .map(|comment| {
+                                let replies_count = comment
+                                    .pointer("/replies/data")
+                                    .and_then(Value::as_array)
+                                    .map_or(0, |replies| replies.len() as u64);
+                                1 + replies_count
+                            })
+                            .sum::<u64>()
+                    })
+                    .unwrap_or_default()
+            })
+            .sum::<u64>();
+        Ok(json!({
+            "posts": posts,
+            "reported_comments": reported_comments,
+            "retrieved_comments": retrieved_comments,
+            "comments_incomplete": reported_comments > retrieved_comments,
+            "failed_publications": failed_publications,
+            "empty_comment_edges": empty_comment_edges,
+        }))
+    }
+
+    pub async fn comments_probe(
+        &self,
+        account_id: &str,
+        media_id: Option<&str>,
+    ) -> Result<Value, MetaError> {
+        let service = self
+            .service_for_account(account_id)
+            .await
+            .ok_or_else(|| MetaError::new("Instagram account comments are not configured"))?;
+        service.probe_media_comments(media_id).await
+    }
+}
+
+pub async fn run_token_maintenance(state: AppState) {
+    let mut interval = tokio::time::interval(Duration::from_secs(86_400));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        interval.tick().await;
+        if let Err(error) = state.refresh_due_tokens().await {
+            tracing::warn!(%error, "Instagram token maintenance failed");
+        }
     }
 }
 

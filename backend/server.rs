@@ -1,4 +1,6 @@
-use api_publicacao_backend::app::{AppConfig, AppState, build_router, run_scheduler};
+use api_publicacao_backend::app::{
+    AppConfig, AppState, build_router, run_scheduler, run_token_maintenance,
+};
 use std::{env, net::SocketAddr, path::PathBuf};
 use tracing_subscriber::EnvFilter;
 
@@ -32,10 +34,12 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(%address, "Planner Rust backend listening");
 
     let scheduler = tokio::spawn(run_scheduler(state.clone()));
+    let token_maintenance = tokio::spawn(run_token_maintenance(state.clone()));
     let result = axum::serve(listener, build_router(state))
         .with_graceful_shutdown(shutdown_signal())
         .await;
     scheduler.abort();
+    token_maintenance.abort();
     result?;
     Ok(())
 }

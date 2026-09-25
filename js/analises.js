@@ -332,9 +332,12 @@
         labels: ['50k', '40k', '30k', '20k', '10k', '0']
       };
 
-      yAxisContainer.innerHTML = lateral.labels
-        .map(label => `<span class="apple-chart-y-tick">${label}</span>`)
-        .join('');
+      yAxisContainer.replaceChildren(...(lateral.labels || []).map(label => {
+        const tick = document.createElement('span');
+        tick.className = 'apple-chart-y-tick';
+        tick.textContent = String(label);
+        return tick;
+      }));
 
       // Dimensions
       const width = container.clientWidth || 800;
@@ -345,6 +348,43 @@
       const points = chartData.points;
       const maxVal = lateral.max || 50000;
       const averageViews = points.reduce((sum, point) => sum + Number(point.views || 0), 0) / points.length;
+      const getReelKey = reel => String(reel.id || `${reel.timestamp || ''}|${reel.permalink || ''}`);
+      const parseReelTimestamp = value => {
+        if (!value) return null;
+        const normalized = String(value).replace(/([+-]\d{2})(\d{2})$/, '$1:$2');
+        const timestamp = new Date(normalized);
+        return Number.isNaN(timestamp.getTime()) ? null : timestamp;
+      };
+      const formatReelInterval = elapsedMs => {
+        const totalMinutes = Math.max(0, Math.floor(elapsedMs / 60_000));
+        if (totalMinutes < 1) return { compact: '<1 min', label: 'menos de 1 minuto' };
+        const days = Math.floor(totalMinutes / 1_440);
+        const hours = Math.floor((totalMinutes % 1_440) / 60);
+        const minutes = totalMinutes % 60;
+        const compact = days
+          ? `${days}d${hours ? ` ${hours}h` : ''}`
+          : hours
+            ? `${hours}h`
+            : `${minutes}m`;
+        const label = [
+          days && `${days} ${days === 1 ? 'dia' : 'dias'}`,
+          hours && `${hours} ${hours === 1 ? 'hora' : 'horas'}`,
+          minutes && `${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}`
+        ].filter(Boolean).join(' e ');
+        return { compact, label };
+      };
+      const reelTimeline = points.flatMap(point => (point.reels || []).map(reel => ({
+        reel,
+        timestamp: parseReelTimestamp(reel.timestamp)
+      })))
+        .filter(item => item.timestamp)
+        .sort((a, b) => a.timestamp - b.timestamp);
+      const reelIntervals = new Map();
+      for (let index = 1; index < reelTimeline.length; index += 1) {
+        const current = reelTimeline[index];
+        const previous = reelTimeline[index - 1];
+        reelIntervals.set(getReelKey(current.reel), formatReelInterval(current.timestamp - previous.timestamp));
+      }
       const averageValue = document.getElementById('appleChartAverageValue');
       if (averageValue) averageValue.textContent = Math.round(averageViews).toLocaleString('pt-BR');
       const averageToggle = document.getElementById('btnToggleChartAverage');
@@ -402,6 +442,14 @@
       const lastX = coords[coords.length - 1].x;
       const areaPath = `${linePath} L ${lastX} ${baselineY} L ${firstX} ${baselineY} Z`;
       const averageY = getY(averageViews);
+      const averageMarker = document.createElement('span');
+      averageMarker.className = 'apple-chart-y-average';
+      averageMarker.textContent = Math.round(averageViews).toLocaleString('pt-BR');
+      averageMarker.setAttribute('aria-label', `Média do período: ${averageMarker.textContent} visualizações`);
+      averageMarker.hidden = !this.averageVisible;
+      const yAxisHeight = yAxisContainer.clientHeight || height;
+      averageMarker.style.top = `${Math.max(10, Math.min(yAxisHeight - 10, averageY))}px`;
+      yAxisContainer.appendChild(averageMarker);
       const averageLine = this.averageVisible
         ? `<line class="apple-chart-average-line" x1="${firstX.toFixed(1)}" y1="${averageY.toFixed(1)}" x2="${lastX.toFixed(1)}" y2="${averageY.toFixed(1)}" />`
         : '';
@@ -472,6 +520,7 @@
           marker.style.left = `${coord.x}px`;
           marker.style.top = `${coord.y - 10}px`;
 
+          const firstReelInterval = reelIntervals.get(getReelKey(firstReel));
           marker.innerHTML = `
             <div class="apple-compact-reel-card" title="${this.escapeHtml(firstReel.caption || 'Reel')}">
               <img src="${firstReel.thumbnail_url}" alt="Reel cover" onerror="this.src='assets/avatar.jpg'" loading="lazy" />
@@ -480,6 +529,7 @@
               </div>
               ${hasMultiple ? `<div class="apple-reel-multi-badge">+${pt.reels.length}</div>` : ''}
             </div>
+            <div class="apple-reel-post-gap" title="${firstReelInterval ? `Intervalo desde o Reel anterior: ${firstReelInterval.label}` : 'Primeiro Reel no período selecionado'}">${firstReelInterval?.compact || '1º no período'}</div>
             <div class="apple-reel-stem-line"></div>
           `;
 
@@ -488,10 +538,10 @@
       });
 
       // 8. Crosshair & Tooltip Interaction on Chart SVG
-      this.attachChartInteractions(container, coords);
+      this.attachChartInteractions(container, coords, reelIntervals, getReelKey, parseReelTimestamp);
     },
 
-    attachChartInteractions(container, coords) {
+    attachChartInteractions(container, coords, reelIntervals, getReelKey, parseReelTimestamp) {
       const tooltip = document.getElementById('appleChartTooltip');
       if (!tooltip || coords.length === 0) return;
 
@@ -499,7 +549,10 @@
       this.chartInteraction = {
         coords,
         left: rect.left,
-        width: container.clientWidth || 800
+        width: container.clientWidth || 800,
+        reelIntervals,
+        getReelKey,
+        parseReelTimestamp
       };
       this.chartLastPointIndex = -1;
       this.chartTooltipHalfWidth = 85;
@@ -558,11 +611,16 @@
                 ? null
                 : timestamp.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: timezone });
             };
-            const reelTimes = (closest.point.reels || [])
-              .map(reel => ({ timestamp: new Date(String(reel.timestamp || '').replace(/([+-]\d{2})(\d{2})$/, '$1:$2')), label: formatTime(reel.timestamp) }))
-              .filter(reel => reel.label && !Number.isNaN(reel.timestamp.getTime()))
+            const reelDetails = (closest.point.reels || [])
+              .map(reel => ({
+                timestamp: interaction.parseReelTimestamp(reel.timestamp),
+                label: formatTime(reel.timestamp),
+                interval: interaction.reelIntervals.get(interaction.getReelKey(reel))
+              }))
+              .filter(reel => reel.label && reel.timestamp)
               .sort((a, b) => a.timestamp - b.timestamp)
-              .map(reel => reel.label);
+              .map(reel => `<div class="apple-chart-tooltip-time"><i class="fa-regular fa-clock" aria-hidden="true"></i><span>Reel às ${reel.label} · ${reel.interval ? `Intervalo: ${reel.interval.label}` : 'Primeiro Reel no período'}</span></div>`)
+              .join('');
             const updatedTime = closest.point.partial ? formatTime(this.currentData?.updated_at) : null;
             tooltip.innerHTML = `
               <div class="apple-chart-tooltip-date">${closest.point.label}</div>
@@ -572,7 +630,7 @@
               </div>
               ${closest.point.partial ? '<div class="text-[11px] text-gray-500 mt-1">Valor parcial de hoje</div>' : ''}
               ${reelCount ? `<div class="text-[11px] text-purple-600 font-semibold mt-1 flex items-center gap-1"><i class="fa-solid fa-clapperboard text-[10px]"></i> ${reelCount} Reel(s) publicado(s)</div>` : ''}
-              ${reelTimes.length ? `<div class="apple-chart-tooltip-time"><i class="fa-regular fa-clock" aria-hidden="true"></i><span>Reels às ${reelTimes.join(' · ')} (Brasília)</span></div>` : ''}
+              ${reelDetails}
               ${updatedTime ? `<div class="apple-chart-tooltip-time"><i class="fa-regular fa-clock" aria-hidden="true"></i><span>Atualizado às ${updatedTime} (Brasília)</span></div>` : ''}
             `;
             tooltip.classList.add('active');
