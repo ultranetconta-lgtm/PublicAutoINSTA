@@ -66,6 +66,12 @@ As análises mantêm o contrato do painel: períodos `today`, `7d` e `30d`, limi
 
 O plugin local `Instagram Resumos` pode consultar `GET /api/plugin/health` e `GET /api/plugin/summary?days=7` pela URL HTTPS do deploy. Configure `PLUGIN_API_KEY` como secret independente tanto no app Fly quanto no ambiente privado do plugin; ambas as rotas exigem `Authorization: Bearer <PLUGIN_API_KEY>`, são somente leitura e aceitam `days=1`, `7` ou `30`. O token da Meta não é enviado ao plugin.
 
+O callback do Instagram é `https://publicautoinsta-api.fly.dev/webhooks/instagram`. `GET` sem parâmetros mostra uma mensagem de status; a verificação da Meta devolve `hub.challenge` em texto puro quando `hub.mode=subscribe` e `META_WEBHOOK_VERIFY_TOKEN` correspondem. Para receber notificações do caso de uso Instagram, configure `META_APP_SECRET` com o valor de “Chave secreta do app do Instagram” exibido nas configurações desse caso de uso no Meta. Os `POST` validam `X-Hub-Signature-256`, aceitam payloads `object=instagram` até 256 KiB e registram apenas quantidade de entradas/campos, sem armazenar o conteúdo dos comentários.
+
+Na aba **Comentários**, cada comentário tem um campo de resposta. O envio usa `POST /api/comments/{comment_id}/reply` e a permissão `instagram_business_manage_comments` (Instagram Login) ou `instagram_manage_comments` (Facebook Login). A mensagem só é enviada quando o usuário pressiona **Enviar resposta**.
+
+A política de privacidade pública do app está disponível em `GET /privacy-policy` no domínio HTTPS do deploy.
+
 ## Deploy Fly.io
 
 O Dockerfile compila um binário Rust release em uma etapa de build e executa esse binário com FFmpeg na imagem final. Fly escuta na porta 8080; os dados persistem no volume `/data`, montado em `backend/data` e `backend/uploads` para preservar os caminhos e os agendamentos atuais.
@@ -74,7 +80,7 @@ Um teste de `Publicar agora` altera a conta do Instagram. Os testes automáticos
 
 ## Versões e rollback
 
-A release GitHub `v1.0` permanece disponível como versão anterior; `v2.0.0` identifica a migração para Rust, `v2.1.0` adiciona publicação independente por conta e `v2.2.0` reúne comentários, renovação automática de tokens e melhorias de Reels e perfis. Para voltar o app Fly ao código 1.0:
+A release GitHub `v1.0` permanece disponível como versão anterior; `v2.0.0` identifica a migração para Rust, `v2.1.0` adiciona publicação independente por conta, `v2.2.0` reúne renovação automática de tokens e melhorias de Reels e perfis, e `v2.3.0` acrescenta comentários paginados com respostas em lote, webhook Instagram assinado e endpoint público para a política de privacidade. Para voltar o app Fly ao código 1.0:
 
 ```bash
 git switch --detach v1.0

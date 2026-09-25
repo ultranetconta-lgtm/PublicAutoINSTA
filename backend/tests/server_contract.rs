@@ -69,6 +69,199 @@ async fn health_never_returns_configured_credentials() {
 }
 
 #[tokio::test]
+async fn privacy_policy_page_is_public_and_contains_user_supplied_policy_text() {
+    let temp = TempDir::new().expect("temporary project root");
+    let response = build_router(test_state(temp.path()))
+        .oneshot(Request::get("/privacy-policy").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response.headers()[header::CONTENT_TYPE]
+            .to_str()
+            .unwrap()
+            .starts_with("text/html")
+    );
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    for expected in [
+        "Política de Privacidade",
+        "utilizado exclusivamente para automações internas relacionadas a uma conta comercial do Instagram",
+        "comentários e mensagens",
+        "não são compartilhados com terceiros",
+        "Nenhuma informação pessoal é vendida ou distribuída",
+        "gu95ckt02@gmail.com",
+    ] {
+        assert!(html.contains(expected), "missing policy text: {expected}");
+    }
+}
+
+#[tokio::test]
+async fn instagram_webhook_verification_returns_plain_challenge_for_matching_token() {
+    let temp = TempDir::new().expect("temporary project root");
+    let config = AppConfig {
+        meta_webhook_verify_token: "webhook-token".into(),
+        ..AppConfig::default()
+    };
+    let response = build_router(AppState::new(config, temp.path()).unwrap())
+        .oneshot(
+            Request::get(
+                "/webhooks/instagram?hub.mode=subscribe&hub.verify_token=webhook-token&hub.challenge=challenge-123",
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()[header::CONTENT_TYPE],
+        "text/plain; charset=utf-8"
+    );
+    assert_eq!(
+        response.into_body().collect().await.unwrap().to_bytes(),
+        "challenge-123"
+    );
+}
+
+#[tokio::test]
+async fn instagram_webhook_verification_rejects_wrong_token_and_missing_configuration() {
+    let temp = TempDir::new().expect("temporary project root");
+    let config = AppConfig {
+        meta_webhook_verify_token: "webhook-token".into(),
+        ..AppConfig::default()
+    };
+    let response = build_router(AppState::new(config, temp.path()).unwrap())
+        .oneshot(
+            Request::get(
+                "/webhooks/instagram?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=challenge-123",
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let response = build_router(test_state(temp.path()))
+        .oneshot(
+            Request::get(
+                "/webhooks/instagram?hub.mode=subscribe&hub.verify_token=webhook-token&hub.challenge=challenge-123",
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn instagram_webhook_root_returns_help_instead_of_query_deserialization_error() {
+    let temp = TempDir::new().expect("temporary project root");
+    let response = build_router(test_state(temp.path()))
+        .oneshot(
+            Request::get("/webhooks/instagram")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body = String::from_utf8(body.to_vec()).unwrap();
+    assert!(body.contains("endpoint"));
+    assert!(!body.contains("deserialize"));
+}
+
+#[tokio::test]
+async fn instagram_webhook_rejects_incomplete_challenge_parameters_clearly() {
+    let temp = TempDir::new().expect("temporary project root");
+    let response = build_router(test_state(temp.path()))
+        .oneshot(
+            Request::get("/webhooks/instagram?hub.mode=subscribe")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body = String::from_utf8(body.to_vec()).unwrap();
+    assert!(body.contains("hub.verify_token"));
+    assert!(!body.contains("deserialize"));
+}
+
+#[tokio::test]
+async fn instagram_webhook_accepts_signed_comment_events_and_rejects_bad_signatures() {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    let temp = TempDir::new().expect("temporary project root");
+    let secret = "test-app-secret";
+    let body = r#"{"object":"instagram","entry":[{"id":"ig-user","changes":[{"field":"comments","value":{"id":"comment-1","text":"Test comment"}}]}]}"#;
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).unwrap();
+    mac.update(body.as_bytes());
+    let signature = mac.finalize().into_bytes();
+    let signature = signature
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let config = AppConfig {
+        meta_app_secret: secret.into(),
+        ..AppConfig::default()
+    };
+
+    let response = build_router(AppState::new(config.clone(), temp.path()).unwrap())
+        .oneshot(
+            Request::post("/webhooks/instagram")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("x-hub-signature-256", format!("sha256={signature}"))
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.into_body().collect().await.unwrap().to_bytes(),
+        "EVENT_RECEIVED"
+    );
+
+    let response = build_router(AppState::new(config, temp.path()).unwrap())
+        .oneshot(
+            Request::post("/webhooks/instagram")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("x-hub-signature-256", "sha256=invalid")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn instagram_webhook_requires_app_secret_configuration_for_post_events() {
+    let temp = TempDir::new().expect("temporary project root");
+    let response = build_router(test_state(temp.path()))
+        .oneshot(
+            Request::post("/webhooks/instagram")
+                .header("x-hub-signature-256", "sha256=00")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
 async fn due_instagram_token_is_refreshed_and_persisted_without_immediate_retry() {
     let temp = TempDir::new().unwrap();
     let (graph_url, server, requests) = mock_graph_server().await;
@@ -521,6 +714,8 @@ async fn analytics_contract_uses_local_meta_responses_and_actual_reel_views() {
         instagram_user_id: "ig-user".into(),
         instagram_username: "alesantorooficial".into(),
         plugin_api_key: String::new(),
+        meta_app_secret: String::new(),
+        meta_webhook_verify_token: String::new(),
         graph_api_base_url: base_url,
         graph_api_version: "v26.0".into(),
         public_base_url: String::new(),

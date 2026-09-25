@@ -5,6 +5,8 @@ use reqwest::{Client, Method, Url};
 use serde_json::{Value, json};
 use std::time::Duration;
 
+const COMMENT_REPLY_CONCURRENCY: usize = 5;
+
 #[derive(Clone)]
 pub struct MetaClient {
     access_token: String,
@@ -509,7 +511,7 @@ impl MetaClient {
                     match client
                         .get_all_pages(
                             &comments_endpoint,
-                            "id,text,username,timestamp,replies{id,text,username,timestamp}",
+                            "id,text,username,from{id,username},timestamp,hidden,media,replies{id,text,username,from{id,username},timestamp}",
                         )
                         .await
                     {
@@ -580,6 +582,124 @@ impl MetaClient {
         let data = [("message", message.to_string())];
         self.request_json(Method::POST, &endpoint, Some(&data))
             .await
+    }
+
+    async fn get_comment_for_reply(&self, comment_id: &str) -> Result<Value, MetaError> {
+        let comment_id = comment_id.trim();
+        if comment_id.is_empty()
+            || comment_id.len() > 128
+            || !comment_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        {
+            return Err(MetaError::new("invalid Instagram comment ID"));
+        }
+        let endpoint = self.container_endpoint(comment_id);
+        let mut url = Url::parse(&endpoint)
+            .map_err(|_| MetaError::new("Instagram comment URL is invalid"))?;
+        url.query_pairs_mut()
+            .append_pair("fields", "id,username,replies{id,username}");
+        self.request_json(Method::GET, url.as_str(), None).await
+    }
+
+    pub async fn reply_to_comments(
+        &self,
+        replies: &[(String, String)],
+        account_username: &str,
+    ) -> Result<Vec<Value>, MetaError> {
+        let normalized_account_username = account_username
+            .trim()
+            .trim_start_matches('@')
+            .to_lowercase();
+        let client = self.clone();
+        let mut indexed_results = stream::iter(replies.to_vec().into_iter().enumerate())
+            .map(|(index, (comment_id, message))| {
+                let client = client.clone();
+                let normalized_account_username = normalized_account_username.clone();
+                async move {
+                    let comment = match client.get_comment_for_reply(&comment_id).await {
+                        Ok(comment) => comment,
+                        Err(error) => {
+                            return (
+                            index,
+                            json!({
+                                "comment_id": comment_id,
+                                "ok": false,
+                                "message": redact(&error.message, &client.access_token),
+                            }),
+                        );
+                    }
+                };
+
+                let returned_id = comment.get("id").and_then(Value::as_str).unwrap_or_default();
+                if returned_id != comment_id {
+                    return (
+                        index,
+                        json!({
+                            "comment_id": comment_id,
+                            "ok": false,
+                            "message": "A Meta não confirmou este comentário; não enviei a resposta.",
+                        }),
+                    );
+                }
+
+                let author_username = comment
+                    .get("username")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .trim_start_matches('@')
+                    .to_lowercase();
+                if !normalized_account_username.is_empty()
+                    && author_username == normalized_account_username
+                {
+                    return (
+                        index,
+                        json!({
+                            "comment_id": comment_id,
+                            "ok": false,
+                            "own_comment": true,
+                            "blocked": true,
+                            "message": "Este comentário foi publicado pela conta conectada; não respondi a ele.",
+                        }),
+                    );
+                }
+
+                let nested_replies = comment
+                    .pointer("/replies/data")
+                    .and_then(Value::as_array)
+                    .or_else(|| comment.get("replies").and_then(Value::as_array));
+                if nested_replies.is_some_and(|nested_replies| !nested_replies.is_empty()) {
+                    return (
+                        index,
+                        json!({
+                            "comment_id": comment_id,
+                            "ok": false,
+                            "already_replied": true,
+                            "blocked": true,
+                            "message": "Este comentário já tem uma resposta; não enviei outra.",
+                        }),
+                    );
+                }
+
+                let result = match client.reply_to_comment(&comment_id, &message).await {
+                    Ok(reply) => json!({"comment_id": comment_id, "ok": true, "reply": reply}),
+                    Err(error) => json!({
+                        "comment_id": comment_id,
+                        "ok": false,
+                        "message": redact(&error.message, &client.access_token),
+                    }),
+                };
+                (index, result)
+                }
+            })
+            .buffer_unordered(COMMENT_REPLY_CONCURRENCY)
+            .collect::<Vec<_>>()
+            .await;
+        indexed_results.sort_unstable_by_key(|(index, _)| *index);
+        Ok(indexed_results
+            .into_iter()
+            .map(|(_, result)| result)
+            .collect())
     }
 
     pub async fn probe_media_comments(

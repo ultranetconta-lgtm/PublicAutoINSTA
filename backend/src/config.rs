@@ -2,12 +2,14 @@ use serde_json::{Value, json};
 use std::{collections::HashMap, env, fs, path::Path};
 use url::Url;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AppConfig {
     pub access_token: String,
     pub instagram_user_id: String,
     pub instagram_username: String,
     pub plugin_api_key: String,
+    pub meta_app_secret: String,
+    pub meta_webhook_verify_token: String,
     pub graph_api_base_url: String,
     pub graph_api_version: String,
     pub public_base_url: String,
@@ -20,6 +22,8 @@ impl Default for AppConfig {
             instagram_user_id: String::new(),
             instagram_username: String::new(),
             plugin_api_key: String::new(),
+            meta_app_secret: String::new(),
+            meta_webhook_verify_token: String::new(),
             graph_api_base_url: "https://graph.instagram.com".into(),
             graph_api_version: "v25.0".into(),
             public_base_url: String::new(),
@@ -35,6 +39,8 @@ impl AppConfig {
             instagram_user_id: env_value("INSTAGRAM_USER_ID", &file_values, ""),
             instagram_username: env_value("INSTAGRAM_USERNAME", &file_values, ""),
             plugin_api_key: env_value("PLUGIN_API_KEY", &file_values, ""),
+            meta_app_secret: env_value("META_APP_SECRET", &file_values, ""),
+            meta_webhook_verify_token: env_value("META_WEBHOOK_VERIFY_TOKEN", &file_values, ""),
             graph_api_base_url: env_value(
                 "GRAPH_API_BASE_URL",
                 &file_values,

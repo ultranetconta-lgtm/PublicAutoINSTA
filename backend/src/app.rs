@@ -36,6 +36,8 @@ pub struct AppState {
     pub accounts: AccountStore,
     pub service: Option<Arc<MetaClient>>,
     pub reel_submit_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    pub comment_reply_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    pub sent_comment_replies: Arc<Mutex<HashSet<(String, String)>>>,
     pub scheduler_notify: Arc<Notify>,
     pub analytics_snapshot: AnalyticsSnapshot,
 }
@@ -65,6 +67,8 @@ impl AppState {
             accounts,
             service,
             reel_submit_locks: Arc::new(Mutex::new(HashMap::new())),
+            comment_reply_locks: Arc::new(Mutex::new(HashMap::new())),
+            sent_comment_replies: Arc::new(Mutex::new(HashSet::new())),
             scheduler_notify: Arc::new(Notify::new()),
             analytics_snapshot: Arc::new(Mutex::new(HashMap::new())),
         })

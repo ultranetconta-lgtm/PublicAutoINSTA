@@ -20,9 +20,9 @@
   <script src="https://cdn.tailwindcss.com"></script>
   
   <!-- Application Styles -->
-  <link rel="stylesheet" href="css/styles.css?v=account-avatars-20260925-1">
+  <link rel="stylesheet" href="css/styles.css?v=apple-ui-20260925-2">
   <link rel="stylesheet" href="css/analises.css?v=chart-intervals-20260925-1">
-  <link rel="stylesheet" href="css/comentarios.css?v=comments-tab-20260925-4">
+  <link rel="stylesheet" href="css/comentarios.css?v=comments-bulk-replies-20260925-3">
 </head>
 <body>
 
@@ -892,6 +892,21 @@
         <div class="comentarios-status" id="commentsStatus" role="status" aria-live="polite">Abra esta aba para buscar comentários no Instagram.</div>
         <section class="comentarios-list" id="commentsList" aria-label="Comentários mais recentes"></section>
       </main>
+      <aside class="comentarios-batch-bar" aria-label="Envio de respostas">
+        <div class="comentarios-batch-summary" aria-live="polite">
+          <span><strong id="commentsBatchCount">0</strong> respostas prontas</span>
+          <span class="comentarios-batch-divider" aria-hidden="true"></span>
+          <span><strong id="commentsAnsweredTotal">0</strong> comentários respondidos</span>
+          <span class="comentarios-batch-divider" aria-hidden="true"></span>
+          <span><strong id="commentsPendingTotal">0</strong> comentários pendentes</span>
+          <span class="comentarios-batch-divider" aria-hidden="true"></span>
+          <span><strong id="commentsTextlessTotal">0</strong> pendentes sem texto</span>
+        </div>
+        <button type="button" id="btnSendCommentReplies" disabled>
+          <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
+          <span>Enviar respostas</span>
+        </button>
+      </aside>
     </div>
 
   </div>
@@ -1180,7 +1195,7 @@
 
   <!-- Application Logic -->
   <script src="js/analises.js?v=chart-intervals-20260925-2"></script>
-  <script src="js/comentarios.js?v=comments-tab-20260925-5"></script>
+  <script src="js/comentarios.js?v=comment-bulk-replies-20260925-2"></script>
   <script src="js/app.js?v=account-avatars-20260925-1"></script>
 </body>
 </html>

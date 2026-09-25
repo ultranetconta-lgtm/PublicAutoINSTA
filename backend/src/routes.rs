@@ -1,18 +1,19 @@
 use crate::{
     app::{self, AppState, UploadedMedia, WorkflowError, public_schedule},
     media::{self, MAX_FORM_FIELD_BYTES, MAX_UPLOAD_BYTES},
+    meta::MetaClient,
 };
 use axum::{
     Router,
-    body::Body,
+    body::{Body, to_bytes},
     extract::{FromRequest, Json, Multipart, Path, Query, State},
     http::{HeaderMap, Method, Request, StatusCode, header},
-    response::{IntoResponse, Response},
+    response::{Html, IntoResponse, Response},
     routing::{get, patch, post},
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 use tempfile::NamedTempFile;
 use tower::ServiceExt;
 use tower_http::services::ServeDir;
@@ -25,9 +26,15 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/schedules", get(list_schedules))
         .route("/api/analytics", get(analytics))
         .route("/api/comments", get(comments))
+        .route("/api/comments/replies", post(reply_to_comments))
         .route("/api/comments/{comment_id}/reply", post(reply_to_comment))
         .route("/api/plugin/health", get(plugin_health))
         .route("/api/plugin/summary", get(plugin_summary))
+        .route(
+            "/webhooks/instagram",
+            get(verify_instagram_webhook).post(receive_instagram_webhook),
+        )
+        .route("/privacy-policy", get(privacy_policy))
         .route("/api/posts", post(create_post))
         .route("/api/carousels", post(create_carousel))
         .route("/api/stories", post(create_story))
@@ -46,6 +53,166 @@ pub fn build_router(state: AppState) -> Router {
 
 async fn health(State(state): State<AppState>) -> Response {
     json_response(StatusCode::OK, state.health())
+}
+
+async fn privacy_policy() -> Html<&'static str> {
+    Html(include_str!("privacy_policy.html"))
+}
+
+#[derive(Deserialize, Default)]
+struct InstagramWebhookVerification {
+    #[serde(rename = "hub.mode")]
+    mode: Option<String>,
+    #[serde(rename = "hub.verify_token")]
+    verify_token: Option<String>,
+    #[serde(rename = "hub.challenge")]
+    challenge: Option<String>,
+}
+
+async fn verify_instagram_webhook(
+    State(state): State<AppState>,
+    Query(query): Query<InstagramWebhookVerification>,
+) -> Response {
+    if query.mode.is_none() && query.verify_token.is_none() && query.challenge.is_none() {
+        return (
+            StatusCode::OK,
+            "Instagram webhook endpoint ativo; a Meta usa parâmetros hub.* para verificar a URL.",
+        )
+            .into_response();
+    }
+    let (Some(mode), Some(verify_token), Some(challenge)) = (
+        query.mode.as_deref(),
+        query.verify_token.as_deref(),
+        query.challenge,
+    ) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "Parâmetros incompletos: hub.mode, hub.verify_token e hub.challenge são obrigatórios.",
+        )
+            .into_response();
+    };
+    let expected_token = &state.config.meta_webhook_verify_token;
+    if expected_token.is_empty() {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    if mode != "subscribe" || !constant_time_eq(expected_token, verify_token) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let mut response = (StatusCode::OK, challenge).into_response();
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        "no-store".parse().expect("static cache-control header"),
+    );
+    response
+}
+
+const MAX_INSTAGRAM_WEBHOOK_BYTES: usize = 256 * 1024;
+
+async fn receive_instagram_webhook(
+    State(state): State<AppState>,
+    request: Request<Body>,
+) -> Response {
+    let content_length = request
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok());
+    tracing::info!(
+        content_length,
+        signature_present = request.headers().contains_key("x-hub-signature-256"),
+        "Instagram webhook POST received"
+    );
+    let Some(signature) = request
+        .headers()
+        .get("x-hub-signature-256")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)
+    else {
+        tracing::warn!("Rejected Instagram webhook without signature");
+        return StatusCode::FORBIDDEN.into_response();
+    };
+    if state.config.meta_app_secret.is_empty() {
+        tracing::error!("Instagram webhook App Secret is not configured");
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    let body = match to_bytes(request.into_body(), MAX_INSTAGRAM_WEBHOOK_BYTES).await {
+        Ok(body) => body,
+        Err(_) => {
+            tracing::warn!("Rejected oversized Instagram webhook payload");
+            return StatusCode::PAYLOAD_TOO_LARGE.into_response();
+        }
+    };
+    if !valid_meta_signature(&state.config.meta_app_secret, &body, &signature) {
+        tracing::warn!("Rejected Instagram webhook with invalid signature");
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let payload: Value = match serde_json::from_slice(&body) {
+        Ok(payload) => payload,
+        Err(_) => {
+            tracing::warn!("Rejected Instagram webhook with invalid JSON");
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+    };
+    if payload.get("object").and_then(Value::as_str) != Some("instagram")
+        || !payload.get("entry").is_some_and(Value::is_array)
+    {
+        tracing::warn!("Rejected Instagram webhook with unexpected payload shape");
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let fields: Vec<&str> = payload["entry"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|entry| entry["changes"].as_array().into_iter().flatten())
+        .filter_map(|change| change["field"].as_str())
+        .collect();
+    tracing::info!(
+        entries = payload["entry"].as_array().map_or(0, Vec::len),
+        fields = ?fields,
+        "Verified Instagram webhook received"
+    );
+    (StatusCode::OK, "EVENT_RECEIVED").into_response()
+}
+
+fn valid_meta_signature(secret: &str, body: &[u8], signature: &str) -> bool {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    let Some(signature_hex) = signature.strip_prefix("sha256=") else {
+        return false;
+    };
+    if signature_hex.len() != 64 {
+        return false;
+    }
+    let mut signature_bytes = [0_u8; 32];
+    for (index, pair) in signature_hex.as_bytes().chunks_exact(2).enumerate() {
+        let Ok(pair) = std::str::from_utf8(pair) else {
+            return false;
+        };
+        let Ok(byte) = u8::from_str_radix(pair, 16) else {
+            return false;
+        };
+        signature_bytes[index] = byte;
+    }
+    let Ok(mut mac) = Hmac::<Sha256>::new_from_slice(secret.as_bytes()) else {
+        return false;
+    };
+    mac.update(body);
+    mac.verify_slice(&signature_bytes).is_ok()
+}
+
+fn constant_time_eq(expected: &str, provided: &str) -> bool {
+    let expected = expected.as_bytes();
+    let provided = provided.as_bytes();
+    if expected.len() != provided.len() {
+        return false;
+    }
+    expected
+        .iter()
+        .zip(provided)
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        })
+        == 0
 }
 
 #[derive(Deserialize)]
@@ -331,6 +498,179 @@ struct CommentReplyRequest {
     message: String,
 }
 
+#[derive(Deserialize)]
+struct CommentBatchReply {
+    comment_id: String,
+    message: String,
+}
+
+#[derive(Deserialize)]
+struct CommentBatchReplyRequest {
+    account_id: String,
+    replies: Vec<CommentBatchReply>,
+}
+
+const MAX_COMMENT_REPLIES_PER_REQUEST: usize = 50;
+
+async fn reply_to_comments(
+    State(state): State<AppState>,
+    Json(payload): Json<CommentBatchReplyRequest>,
+) -> Response {
+    let account_id = payload.account_id.trim();
+    if account_id.is_empty() {
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            json!({"ok": false, "error": "instagram_account_required", "message": "Selecione uma conta do Instagram."}),
+        );
+    }
+    if payload.replies.is_empty() || payload.replies.len() > MAX_COMMENT_REPLIES_PER_REQUEST {
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            json!({"ok": false, "error": "invalid_comment_reply_batch", "message": "A API aceita até 50 respostas por chamada."}),
+        );
+    }
+
+    let mut seen_ids = std::collections::HashSet::with_capacity(payload.replies.len());
+    let mut replies = Vec::with_capacity(payload.replies.len());
+    for reply in payload.replies {
+        let comment_id = reply.comment_id.trim();
+        let message = reply.message.trim();
+        if comment_id.is_empty()
+            || comment_id.len() > 128
+            || !comment_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+            || !seen_ids.insert(comment_id.to_string())
+        {
+            return json_response(
+                StatusCode::BAD_REQUEST,
+                json!({"ok": false, "error": "invalid_comment_id", "message": "Há um identificador de comentário inválido ou repetido."}),
+            );
+        }
+        if message.is_empty() || message.chars().count() > 2200 {
+            return json_response(
+                StatusCode::BAD_REQUEST,
+                json!({"ok": false, "error": "invalid_comment_reply", "message": "Cada resposta deve conter até 2.200 caracteres e não pode ficar vazia."}),
+            );
+        }
+        replies.push((comment_id.to_string(), message.to_string()));
+    }
+
+    let account = match state.resolve_account(Some(account_id)).await {
+        Ok(account) => account,
+        Err(error) => return workflow_error(error),
+    };
+    let Some(service) = state.service_for_account(&account.id).await else {
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            json!({"ok": false, "error": "instagram_account_not_found", "message": "A conta selecionada não está conectada neste planejador."}),
+        );
+    };
+    send_comment_reply_batch(&state, &account.id, &account.username, &service, &replies).await
+}
+
+async fn send_comment_reply_batch(
+    state: &AppState,
+    account_id: &str,
+    account_username: &str,
+    service: &MetaClient,
+    replies: &[(String, String)],
+) -> Response {
+    let account_lock = {
+        let mut locks = state.comment_reply_locks.lock().await;
+        Arc::clone(
+            locks
+                .entry(account_id.to_string())
+                .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
+        )
+    };
+    let _account_guard = account_lock.lock().await;
+    let already_sent = state.sent_comment_replies.lock().await;
+    let sent_ids: std::collections::HashSet<String> = replies
+        .iter()
+        .filter(|(comment_id, _)| {
+            already_sent.contains(&(account_id.to_string(), comment_id.clone()))
+        })
+        .map(|(comment_id, _)| comment_id.clone())
+        .collect();
+    drop(already_sent);
+
+    let candidates: Vec<(String, String)> = replies
+        .iter()
+        .filter(|(comment_id, _)| !sent_ids.contains(comment_id))
+        .cloned()
+        .collect();
+    let mut results_by_id = HashMap::with_capacity(replies.len());
+    for comment_id in &sent_ids {
+        results_by_id.insert(
+            comment_id.clone(),
+            json!({
+                "comment_id": comment_id,
+                "ok": false,
+                "blocked": true,
+                "already_replied": true,
+                "message": "Este comentário já recebeu uma resposta deste planejador; bloqueei a duplicata.",
+            }),
+        );
+    }
+
+    if !candidates.is_empty() {
+        match service
+            .reply_to_comments(&candidates, account_username)
+            .await
+        {
+            Ok(results) => {
+                let successful_ids: Vec<String> = results
+                    .iter()
+                    .filter(|result| result["ok"] == true)
+                    .filter_map(|result| result["comment_id"].as_str().map(str::to_owned))
+                    .collect();
+                if !successful_ids.is_empty() {
+                    let mut sent = state.sent_comment_replies.lock().await;
+                    sent.extend(
+                        successful_ids
+                            .into_iter()
+                            .map(|comment_id| (account_id.to_string(), comment_id)),
+                    );
+                }
+                for result in results {
+                    if let Some(comment_id) = result["comment_id"].as_str() {
+                        results_by_id.insert(comment_id.to_string(), result);
+                    }
+                }
+            }
+            Err(error) => {
+                return json_response(
+                    StatusCode::BAD_GATEWAY,
+                    json!({"ok": false, "error": "instagram_comment_reply_batch_failed", "message": error.message}),
+                );
+            }
+        }
+    }
+
+    let results: Vec<Value> = replies
+        .iter()
+        .map(|(comment_id, _)| {
+            results_by_id.remove(comment_id).unwrap_or_else(|| {
+                json!({
+                    "comment_id": comment_id,
+                    "ok": false,
+                    "message": "Não consegui confirmar o resultado desta resposta; revise o comentário antes de tentar novamente.",
+                })
+            })
+        })
+        .collect();
+    let partial = results.iter().any(|result| result["ok"] != true);
+    json_response(
+        if partial {
+            StatusCode::MULTI_STATUS
+        } else {
+            StatusCode::OK
+        },
+        json!({"ok": true, "partial": partial, "results": results}),
+    )
+}
+
 async fn reply_to_comment(
     State(state): State<AppState>,
     Path(comment_id): Path<String>,
@@ -371,15 +711,15 @@ async fn reply_to_comment(
             json!({"ok": false, "error": "instagram_account_not_found", "message": "A conta selecionada não está conectada neste planejador."}),
         );
     };
-    match service.reply_to_comment(&comment_id, message).await {
-        Ok(reply) => json_response(StatusCode::OK, json!({"ok": true, "reply": reply})),
-        Err(error) => json_response(
-            StatusCode::BAD_GATEWAY,
-            json!({"ok": false, "error": "instagram_comment_reply_failed", "message": error.message}),
-        ),
-    }
+    send_comment_reply_batch(
+        &state,
+        &account.id,
+        &account.username,
+        &service,
+        &[(comment_id, message.to_string())],
+    )
+    .await
 }
-
 
 async fn create_story(State(state): State<AppState>, request: Request<Body>) -> Response {
     create_publication(state, request, PublicationEndpoint::Story).await
